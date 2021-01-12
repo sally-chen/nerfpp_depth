@@ -73,37 +73,13 @@ def ddp_test_nerf_fromArr(rank, args, intrs, poses, locs, H, W, plot, normalize,
                 psnr = mse2psnr(np.mean((gt_im - im) * (gt_im - im)))
                 logger.info('{}: psnr={}'.format(fname, psnr))
 
-            im = to8b(im)
+            im = to8b(im)  ##### THIS IS THE RGB OUTPUT, 3xHxW, value is int between 0 and 256
             imageio.imwrite(os.path.join(out_dir, fname), im)
 
-            im = ret[-1]['fg_rgb'].numpy()
-            im = to8b(im)
-            imageio.imwrite(os.path.join(out_dir, 'fg_' + fname), im)
-
-            im = ret[-1]['bg_rgb'].numpy()
-            im = to8b(im)
-            imageio.imwrite(os.path.join(out_dir, 'bg_' + fname), im)
-
-            im = ret[-1]['fg_depth'].numpy()
-
-            im = colorize_np(im, cmap_name='jet', append_cbar=True)
-            im = to8b(im)
-            imageio.imwrite(os.path.join(out_dir, 'fg_depth_' + fname), im)
-
-            im = ret[-1]['bg_depth'].numpy()
-            # im[im > 500] = 500.
-            im = colorize_np(im, cmap_name='jet', append_cbar=True)
-            im = to8b(im)
-            imageio.imwrite(os.path.join(out_dir, 'bg_depth_' + fname), im)
-
-            im = ret[-1]['bg_lambda'].numpy()
-            # im[im > 500] = 500.
-            im = colorize_np(im, cmap_name='jet', append_cbar=True)
-            im = to8b(im)
-            imageio.imwrite(os.path.join(out_dir, 'bg_lambda_' + fname), im)
-
             im = ret[-1]['depth_fgbg'].numpy()
-            im[im > depth_clip] = depth_clip
+            im[im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
+
+
             im = colorize_np(im, cmap_name='jet', append_cbar=True)
             im = to8b(im)
             imageio.imwrite(os.path.join(out_dir, 'Depth_' + fname), im)
@@ -126,14 +102,21 @@ def test():
         logger.info('Using # gpus: {}'.format(args.world_size))
 
 
-    [poses, intrs, locs] = pickle.load(
-        open('/home/sally/nerf/nerfplusplus/nerfpp_inf/data/inf_test/test/sample_arrs', 'rb'))
+    ## replace these 3 with your own in the format of list of np arrays
+    ## format see data/inf_test/test
+    # poses: 4x4 cam2world matrix
+    # intrs: 4x4 intrinsics matrix
+    # locs: [xloc yloc], height of camera is fixed in the code
 
-    H = 380
-    W = 640
-    depth_clip = 60.
-    plot = True
-    normalize = True
+    [poses, intrs, locs] = pickle.load(
+        open('./data/inf_test/test/sample_arrs', 'rb'))
+
+    H = 380 # high of image desired
+    W = 640 # width of image desired
+    depth_clip = 60.  # clip depth
+
+    plot = True  # plot where the pose and box location is, can be disabled with False
+    normalize = True # always true
 
 
     torch.multiprocessing.spawn(ddp_test_nerf_fromArr,
