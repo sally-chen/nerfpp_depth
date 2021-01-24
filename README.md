@@ -4,10 +4,10 @@ Changed version of nerfplusplus (https://github.com/Kai-46/nerfplusplus):
 2. extract combined forground and background depth image
 ### Move objects test 
 Ground truth, xy location + 0.05, xy location + 0.1 , xy location - 0.2
-![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move0.jpg | width=300)
-![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move1.jpg | width=300)
-![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move2.jpg | width=300)
-![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move3.jpg | width=300)
+![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move0.jpg)
+![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move1.jpg)
+![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move2.jpg)
+![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move3.jpg)
 
 
 ### Sample depth output
