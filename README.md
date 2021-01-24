@@ -1,4 +1,5 @@
 # nerfpp_depth
+Changed version of nerfplusplus (https://github.com/Kai-46/nerfplusplus) to extract combined forground and background depth image. 
 
 How to run:
 1. create a new environment with the environment.ymal file 
