@@ -1,5 +1,13 @@
 # nerfpp_depth
-Changed version of nerfplusplus (https://github.com/Kai-46/nerfplusplus) to extract combined forground and background depth image. 
+Changed version of nerfplusplus (https://github.com/Kai-46/nerfplusplus):
+1. train 2 networks for a box and the scene to disentangle them and move the box around 
+2. extract combined forground and background depth image
+
+### Sample depth output
+![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/depth.png)
+![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/depth2.png)
+
+
 
 How to run:
 1. create a new environment with the environment.ymal file 
