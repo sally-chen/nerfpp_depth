@@ -2,6 +2,12 @@
 Changed version of nerfplusplus (https://github.com/Kai-46/nerfplusplus):
 1. train 2 networks for a box and the scene to disentangle them and move the box around 
 2. extract combined forground and background depth image
+### Move objects test 
+![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move0.png)
+![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move1.png)
+![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move2.png)
+![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/move3.png)
+
 
 ### Sample depth output
 ![alt text](https://github.com/sally-chen/nerfpp_depth/blob/main/depth.png)
