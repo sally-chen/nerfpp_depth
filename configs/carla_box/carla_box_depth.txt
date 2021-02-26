@@ -1,7 +1,8 @@
 ### INPUT
-datadir = ./data/lf_data
-scene = africa
-expname = africa
+datadir = ./data/
+scene = big_inters_nom15_samp4x4
+expname = big_inters_norm15_comb_disp_reg
+
 basedir = ./logs
 config = None
 ckpt_path = None
@@ -9,8 +10,8 @@ no_reload = False
 testskip = 1
 
 ### TRAINING
-N_iters = 500001
-N_rand = 512
+N_iters = 1000001
+N_rand = 4096
 lrate = 0.0005
 lrate_decay_factor = 0.1
 lrate_decay_steps = 50000000
@@ -24,8 +25,8 @@ chunk_size = 8192
 
 ### RENDERING
 det = False
-max_freq_log2 = 10
-max_freq_log2_viewdirs = 4
+max_freq_log2 = 10 # 10
+max_freq_log2_viewdirs = 4 # 4
 netdepth = 8
 netwidth = 256
 use_viewdirs = True
@@ -34,3 +35,9 @@ use_viewdirs = True
 i_img = 2000
 i_print = 100
 i_weights = 5000
+
+
+have_box = True
+train_box_only = False
+depth_training = True
+

@@ -15,6 +15,12 @@ def img2mse(x, y, mask=None):
     else:
         return torch.sum((x - y) * (x - y) * mask.unsqueeze(-1)) / (torch.sum(mask) * x.shape[-1] + TINY_NUMBER)
 
+def dep_l1l2loss(x,y,l1l2='l1'):
+    if l1l2 == 'l1':
+        return torch.mean(torch.abs(x-y))
+    else:
+        return torch.mean((x - y) * (x - y))
+
 img_HWC2CHW = lambda x: x.permute(2, 0, 1)
 gray2rgb = lambda x: x.unsqueeze(2).repeat(1, 1, 3)
 
@@ -116,8 +122,9 @@ def colorize_np(x, cmap_name='jet', mask=None, append_cbar=False):
 
 
 # tensor
-def colorize(x, cmap_name='jet', append_cbar=False, mask=None):
-    x = x.numpy()
+def colorize(x, cmap_name='jet', append_cbar=False, mask=None,is_np=False):
+    if not is_np:
+        x = x.numpy()
     if mask is not None:
         mask = mask.numpy().astype(dtype=np.bool)
     x, cbar = colorize_np(x, cmap_name, mask)

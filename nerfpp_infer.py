@@ -113,7 +113,7 @@ def test():
 
     H = 380 # high of image desired
     W = 640 # width of image desired
-    depth_clip = 60.  # clip depth
+    depth_clip = 100.  # clip depth
 
     plot = True  # plot where the pose and box location is, can be disabled with False
     normalize = True # always true

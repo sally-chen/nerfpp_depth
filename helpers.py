@@ -15,7 +15,7 @@ def plot_mult_pose(poses_list, name, labels):
     ax.set_zlabel('Z Label')
     ax.legend()
     plt.title(name)
-    plt.show()
+    plt.savefig("./train_poses.png")
 
 def plot_single_pose(poses, color, ax, label):
     # poses shape N, 3, 4

@@ -134,7 +134,21 @@ class NerfNet(nn.Module):
         bg_rgb_map = bg_lambda.unsqueeze(-1) * bg_rgb_map
         bg_depth_map = bg_lambda * bg_depth_map
         rgb_map = fg_rgb_map + bg_rgb_map
+        
+        _, bg_depth_map = depth2pts_outside(ray_o, ray_d, bg_depth_map)
+        bg_depth_map = bg_lambda * bg_depth_map
+        depth_map = fg_depth_map + bg_depth_map
+        
+        device = torch.cuda.device('cuda:0')
+        max = torch.tensor([100., 140.], device=torch.device('cuda:0'))
+        min = torch.tensor([85., 125.], device=torch.device('cuda:0'))
+        avg_pose = torch.tensor([0.5,  0.5], device=torch.device('cuda:0'))
 
+        depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (max-min) + min
+        ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
+        depth_map = torch.norm(depth_pt_denorm[:,:2] - ro_denorm, dim=1, keepdim=False) 
+
+                                                                 
         ret = OrderedDict([('rgb', rgb_map),            # loss
                            ('fg_weights', fg_weights),  # importance sampling
                            ('bg_weights', bg_weights),  # importance sampling
@@ -142,7 +156,8 @@ class NerfNet(nn.Module):
                            ('fg_depth', fg_depth_map),
                            ('bg_rgb', bg_rgb_map),
                            ('bg_depth', bg_depth_map),
-                           ('bg_lambda', bg_lambda)])
+                           ('bg_lambda', bg_lambda),
+                           ('depth_fgbg', depth_map)])
         return ret
 
 class NerfNetBoxOnly(nn.Module):
@@ -354,7 +369,7 @@ class NerfNetBox(nn.Module):
 
 
         ##
-
+        #ret = [rgb_map,fg_weights,bg_weights,fg_rgb_map,fg_depth_map,bg_rgb_map,bg_depth_map,bg_lambda,depth_map]
         ## somehow denoise pls
         ret = OrderedDict([('rgb', rgb_map),            # loss
                            ('fg_weights', fg_weights),  # importance sampling

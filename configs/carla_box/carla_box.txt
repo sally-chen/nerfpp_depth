@@ -1,7 +1,7 @@
 ### INPUT
 datadir = ./data/
-scene = inf_test
-expname = inf_test
+scene = big_inters_nom15_samp4x4
+expname = big_inters_norm15_comb_correct
 
 basedir = ./logs
 config = None
@@ -10,7 +10,7 @@ no_reload = False
 testskip = 1
 
 ### TRAINING
-N_iters = 500001
+N_iters = 1000001
 N_rand = 4096
 lrate = 0.0005
 lrate_decay_factor = 0.1
@@ -39,4 +39,5 @@ i_weights = 5000
 
 have_box = True
 train_box_only = False
+depth_training = False
 

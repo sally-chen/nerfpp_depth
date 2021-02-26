@@ -3,7 +3,10 @@ from collections import OrderedDict
 import torch
 import cv2
 import imageio
+from PIL import Image
 
+
+visualize_depth = True
 ########################################################################################################################
 # ray batch sampling
 ########################################################################################################################
@@ -41,7 +44,9 @@ class RaySamplerSingleImage(object):
                        mask_path=None,
                        min_depth_path=None,
                        max_depth=None,
-                       box_loc=None):
+                       box_loc=None,
+                       depth_path=None
+                        ):
         super().__init__()
         self.W_orig = W
         self.H_orig = H
@@ -49,6 +54,7 @@ class RaySamplerSingleImage(object):
         self.c2w_mat = c2w
 
         self.img_path = img_path
+        self.depth_path = depth_path
         self.mask_path = mask_path
         self.min_depth_path = min_depth_path
         self.max_depth = max_depth
@@ -58,6 +64,7 @@ class RaySamplerSingleImage(object):
 
 
         self.box_loc = box_loc
+        #print("H:{}, W:{}".format(self.H,self.W))
 
     def set_resolution_level(self, resolution_level):
         if resolution_level != self.resolution_level:
@@ -88,6 +95,29 @@ class RaySamplerSingleImage(object):
             else:
                 self.min_depth = None
 
+            if self.depth_path is not None:
+                # h*w*3
+                self.depth_map = imageio.imread(self.depth_path)[...,:3]
+                imgs = cv2.resize(self.depth_map, (self.W, self.H), interpolation=cv2.INTER_LINEAR)
+                r = imgs[..., 0]
+                g = imgs[..., 1]
+                b = imgs[..., 2]
+                far = 1000.
+                tmp = r + g * 256. + b * 256. * 256.
+                tmp = tmp/(256.*256.*256.-1.)
+                tmp = tmp * far
+
+                # if visualize_depth:
+                # img = Image.fromarray(np.uint8(tmp/1000. * 255), 'L')
+                # img.save('depth_sample.png')
+                # img.show()
+                    # visualize_depth = False
+
+
+                self.depth_map = tmp.reshape((-1))
+            else:
+                self.depth_map = None
+
             self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
                                                                          self.intrinsics, self.c2w_mat)
 
@@ -97,20 +127,32 @@ class RaySamplerSingleImage(object):
         else:
             return None
 
+    def get_depth(self):
+        if self.depth_map is not None:
+            return self.depth_map.reshape((self.H, self.W))
+        else:
+            return None
+
     def get_all(self):
         if self.min_depth is not None:
             min_depth = self.min_depth
         else:
             min_depth = 1e-4 * np.ones_like(self.rays_d[..., 0])
 
+        if self.box_loc is None:
+            box_loc = None
+        else:
+            box_loc = np.tile(self.box_loc, (self.rays_d.shape[0],1))
+        
         ret = OrderedDict([
             ('ray_o', self.rays_o),
             ('ray_d', self.rays_d),
             ('depth', self.depth),
+            ('depth_gt', self.depth_map),
             ('rgb', self.img),
             ('mask', self.mask),
             ('min_depth', min_depth),
-            ('box_loc', np.tile(self.box_loc, (self.rays_d.shape[0],1)))
+            ('box_loc', box_loc)
         ])
         # return torch tensors
         for k in ret:
@@ -146,12 +188,20 @@ class RaySamplerSingleImage(object):
         rays_o = self.rays_o[select_inds, :]    # [N_rand, 3]
         rays_d = self.rays_d[select_inds, :]    # [N_rand, 3]
         depth = self.depth[select_inds]         # [N_rand, ]
-        box_loc = np.tile(self.box_loc, (self.rays_d.shape[0],1))[select_inds, :]
+        if self.box_loc is not None:
+            box_loc = np.tile(self.box_loc, (self.rays_d.shape[0],1))[select_inds, :]
+        else:
+            box_loc = None
 
         if self.img is not None:
             rgb = self.img[select_inds, :]          # [N_rand, 3]
         else:
             rgb = None
+
+        if self.depth_map is not None:
+            depth_map = self.depth_map[select_inds]          # [N_rand, 3]
+        else:
+            depth_map = None
 
         if self.mask is not None:
             mask = self.mask[select_inds]
@@ -167,6 +217,7 @@ class RaySamplerSingleImage(object):
             ('ray_o', rays_o),
             ('ray_d', rays_d),
             ('depth', depth),
+            ('depth_gt', depth_map),
             ('rgb', rgb),
             ('mask', mask),
             ('min_depth', min_depth),
@@ -175,7 +226,8 @@ class RaySamplerSingleImage(object):
         ])
         # return torch tensors
         for k in ret:
-            if isinstance(ret[k], np.ndarray):
+    
+            if ret[k] is not None and isinstance(ret[k], np.ndarray):
                 ret[k] = torch.from_numpy(ret[k])
 
         return ret
