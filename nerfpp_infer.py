@@ -91,7 +91,7 @@ def ddp_test_nerf_fromArr(rank, args, intrs, poses, locs, H, W, plot, normalize,
 
     cleanup()
 
-
+from scipy.spatial.transform import Rotation as R
 def test():
     parser = config_parser()
     args = parser.parse_args()
@@ -111,6 +111,18 @@ def test():
     [poses, intrs, locs] = pickle.load(
         open('./data/inf_test/test/sample_arrs', 'rb'))
 
+    traj = np.load('expert_trajectory.npy')
+    positions = traj[:, :2]
+    yaws = traj[:, 2]
+
+    rotations = R.from_euler('z', yaws).as_matrix()
+    mats = np.zeros((positions.shape[0], 4, 4))
+    mats[:, :3, :3] = rotations
+    mats[:, :2, 3] = positions
+    mats[:, 3, 3] = 1.
+    locs = np.repeat(locs[0].reshape((1, -1)), positions.shape[0], axis=0)
+    intrs = np.repeat(intrs[0].reshape((1, 4, 4)), positions.shape[0], axis=0)
+
     H = 380 # high of image desired
     W = 640 # width of image desired
     depth_clip = 60.  # clip depth
@@ -118,9 +130,12 @@ def test():
     plot = True  # plot where the pose and box location is, can be disabled with False
     normalize = True # always true
 
+#    locs = torch.from_numpy(locs).to(dtype=torch.float)
+#    mats = torch.from_numpy(mats).to(dtype=torch.float)
+#    intrs = torch.from_numpy(intrs).to(dtype=torch.float)
 
     torch.multiprocessing.spawn(ddp_test_nerf_fromArr,
-                                args=(args, intrs, poses, locs, H, W, plot, normalize, depth_clip),
+                                args=(args, intrs, mats, locs, H, W, plot, normalize, depth_clip),
                                 nprocs=args.world_size,
                                 join=True)
 

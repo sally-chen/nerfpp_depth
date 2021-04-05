@@ -8,6 +8,19 @@ import logging
 logger = logging.getLogger(__package__)
 
 
+def einsum_linear(x, weight, bias):
+    print('einsum_linear')
+    y = torch.einsum('b...ij, jk-> b...ik', x, weight.t())
+    return y + bias
+
+class ELinear(nn.Linear):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, x, *args, **kwargs):
+        return einsum_linear(x, self.weight, self.bias)
+
+
 class Embedder(nn.Module):
     def __init__(self, input_dim, max_freq_log2, N_freqs,
                        log_sampling=True, include_input=True,
@@ -141,3 +154,11 @@ class MLPNet(nn.Module):
         ret = OrderedDict([('rgb', rgb),
                            ('sigma', sigma.squeeze(-1))])
         return ret
+
+class WrapperModule(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, *args, **kwargs):
+        return self.module.forward(*args, **kwargs)

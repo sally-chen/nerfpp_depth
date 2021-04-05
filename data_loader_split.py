@@ -7,6 +7,7 @@ import glob
 from helpers import plot_mult_pose
 import random
 import pickle
+import torch
 
 logger = logging.getLogger(__package__)
 
@@ -43,15 +44,15 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True):
         loc = locs[i]
 
         if normalize:
-            max = np.array([100., 140.])
-            min = np.array([85., 125.])
-            avg_pose = np.array([0.5, 0.5])
+            max = torch.tensor([100., 140.], device=pose.device)
+            min = torch.tensor([85., 125.], device=pose.device)
+            avg_pose = torch.tensor([0.5, 0.5], device=pose.device)
 
             pose[:2, 3] = ((pose[:2, 3] - min ) / (max - min) - avg_pose ) * 0.5
             loc[:2] = ((loc[:2] - min ) / (max - min) - avg_pose ) * 0.5
 
 
-        ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose, box_loc=loc))
+        ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose, box_loc=loc, lidar_image=False))
 
 
 

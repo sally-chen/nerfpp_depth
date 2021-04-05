@@ -7,6 +7,7 @@ import torch.multiprocessing
 import os
 from collections import OrderedDict
 from ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, NerfNetBoxOnlyWithAutoExpo
+from nerf_network import WrapperModule
 import time
 from data_loader_split import load_data_split
 import numpy as np
@@ -67,6 +68,15 @@ def perturb_samples(z_vals):
 
     return z_vals
 
+def checknan(*args, **kwargs):
+    for i, arg in enumerate(args):
+        if torch.is_tensor(arg) and torch.any(torch.isnan(arg)):
+            raise ValueError("Found nan at index {:d} in arg".format(i))
+
+    for k, v in kwargs.items():
+        if torch.is_tensor(v) and torch.any(torch.isnan(v)):
+            raise ValueError("Found nan in {}".format(k))
+
 
 def sample_pdf(bins, weights, N_samples, det=False):
     '''
@@ -119,129 +129,90 @@ def sample_pdf(bins, weights, N_samples, det=False):
 
     return samples
 
+@torch.no_grad()
+def eval_fg_pass(ray_o, ray_d, box_loc, fg_net, N_samples, fg_far_depth, fg_query_depths, bg_depth):
+    ret = fg_net(ray_o, ray_d, fg_far_depth, fg_query_depths, bg_depth, box_loc)
+
+    return ret
+
+@torch.no_grad()
+def eval_pass(ray_o, ray_d, box_loc, net, samples, fg_weights, bg_weights, fg_far_depth, fg_depth, bg_depth):
+    fg_weights = fg_weights.detach()
+    fg_depth_mid = .5 * (fg_depth[..., 1:] + fg_depth[..., :-1])    # [..., N_samples-1]
+    checknan(fg_depth_mid)
+    fg_weights = fg_weights[..., 1:-1]                              # [..., N_samples-2]
+    fg_depth_samples = sample_pdf(bins=fg_depth_mid, weights=fg_weights,
+                                  N_samples=samples, det=True)    # [..., N_samples]
+    checknan(fg_depth_samples)
+    fg_depth, _ = torch.sort(torch.cat((fg_depth, fg_depth_samples), dim=-1))
+
+    # sample pdf and concat with earlier samples
+    bg_weights = bg_weights.detach()
+    bg_depth_mid = .5 * (bg_depth[..., 1:] + bg_depth[..., :-1])
+    bg_weights = bg_weights[..., 1:-1]                              # [..., N_samples-2]
+    bg_depth_samples = sample_pdf(bins=bg_depth_mid, weights=bg_weights,
+                                  N_samples=samples, det=True)    # [..., N_samples]
+    bg_depth, _ = torch.sort(torch.cat((bg_depth, bg_depth_samples), dim=-1))
+
+    return net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc), fg_depth, bg_depth,
 
 
-def render_single_image(rank, world_size, models, ray_sampler, chunk_size, train_box_only= False):
+
+#TODO: move to utils
+def vlinspace(a, b, steps):
+    return a.view(-1, 1) + (b - a).view(-1, 1) / (steps - 1) * torch.arange(steps, device=a.device)
+
+def render_single_image(models, ray_sampler):
     ##### parallel rendering of a single image
-    ray_batch = ray_sampler.get_all()
-    # split into ranks; make sure different processes don't overlap
-    rank_split_sizes = [ray_batch['ray_d'].shape[0] // world_size, ] * world_size
-    rank_split_sizes[-1] = ray_batch['ray_d'].shape[0] - sum(rank_split_sizes[:-1])
-    for key in ray_batch:
-        if torch.is_tensor(ray_batch[key]):
-            ray_batch[key] = torch.split(ray_batch[key], rank_split_sizes)[rank].to(rank)
+    rays = ray_sampler.get_all()
 
-    # split into chunks and render inside each process
-    ray_batch_split = OrderedDict()
-    for key in ray_batch:
-        if torch.is_tensor(ray_batch[key]):
-            ray_batch_split[key] = torch.split(ray_batch[key], chunk_size)
 
     # forward and backward
     ret_merge_chunk = [OrderedDict() for _ in range(models['cascade_level'])]
-    for s in range(len(ray_batch_split['ray_d'])):
-        ray_o = ray_batch_split['ray_o'][s]
-        ray_d = ray_batch_split['ray_d'][s]
-        min_depth = ray_batch_split['min_depth'][s]
-        box_loc = ray_batch_split['box_loc'][s]
+    ray_o = rays['ray_o']
+    ray_d = rays['ray_d']
+    min_depth = rays['min_depth']
+    box_loc = rays['box_loc']
 
-        dots_sh = list(ray_d.shape[:-1])
-        for m in range(models['cascade_level']):
-            net = models['net_{}'.format(m)]
-            # sample depths
-            N_samples = models['cascade_samples'][m]
-            if m == 0:
-                # foreground depth
-                fg_far_depth = intersect_sphere(ray_o, ray_d)  # [...,]
-                fg_near_depth = min_depth  # [..., ]
-                step = (fg_far_depth - fg_near_depth) / (N_samples - 1)
-                fg_depth = torch.stack([fg_near_depth + i * step for i in range(N_samples)], dim=-1)  # [..., N_samples]
+    checknan(ray_o, ray_d, ray_d, min_depth, box_loc)
 
-                if not train_box_only:
 
-                    # background depth
-                    bg_depth = torch.linspace(0., 1., N_samples).view(
-                        [1, ] * len(dots_sh) + [N_samples,]).expand(dots_sh + [N_samples,]).to(rank)
+    fg_net = models['net_0']
+    fg_samples = models['cascade_samples'][0]
 
-                # delete unused memory
-                del fg_near_depth
-                del step
-                torch.cuda.empty_cache()
-            else:
-                # sample pdf and concat with earlier samples
-                fg_weights = ret['fg_weights'].clone().detach()
-                fg_depth_mid = .5 * (fg_depth[..., 1:] + fg_depth[..., :-1])    # [..., N_samples-1]
-                fg_weights = fg_weights[..., 1:-1]                              # [..., N_samples-2]
-                fg_depth_samples = sample_pdf(bins=fg_depth_mid, weights=fg_weights,
-                                              N_samples=N_samples, det=True)    # [..., N_samples]
-                fg_depth, _ = torch.sort(torch.cat((fg_depth, fg_depth_samples), dim=-1))
+    fg_far_depth = intersect_sphere(ray_o, ray_d)  # [...,]
+    checknan(fg_far_depth)
+    fg_near_depth = min_depth  # [..., ]
+    fg_query_depths = vlinspace(fg_near_depth,
+                                fg_far_depth, fg_samples).to(ray_o.device)
 
-                if not train_box_only:
+    dots_sh = list(ray_d.shape[:-1])
+    bg_depth = torch.linspace(0., 1., fg_samples).view(
+        [1, ] * len(dots_sh) + [fg_samples,]).expand(
+                                        dots_sh + [fg_samples,]).to(ray_o.device)
 
-                    # sample pdf and concat with earlier samples
-                    bg_weights = ret['bg_weights'].clone().detach()
-                    bg_depth_mid = .5 * (bg_depth[..., 1:] + bg_depth[..., :-1])
-                    bg_weights = bg_weights[..., 1:-1]                              # [..., N_samples-2]
-                    bg_depth_samples = sample_pdf(bins=bg_depth_mid, weights=bg_weights,
-                                                  N_samples=N_samples, det=True)    # [..., N_samples]
-                    bg_depth, _ = torch.sort(torch.cat((bg_depth, bg_depth_samples), dim=-1))
 
-                # delete unused memory
-                del fg_weights
-                del fg_depth_mid
-                del fg_depth_samples
+    ret = eval_fg_pass(ray_o, ray_d, box_loc, fg_net, fg_samples,
+    fg_far_depth, fg_query_depths, bg_depth)
 
-                if not train_box_only:
-                    del bg_weights
-                    del bg_depth_mid
-                    del bg_depth_samples
-                torch.cuda.empty_cache()
+    del fg_near_depth
+    torch.cuda.empty_cache()
 
-            with torch.no_grad():
-                if not train_box_only:
-                    ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc)
-                else:
-                    ret = net(ray_o, ray_d, fg_far_depth, fg_depth)
-            for key in ret:
-                if key not in ['fg_weights', 'bg_weights']:
-                    if torch.is_tensor(ret[key]):
-                        if key not in ret_merge_chunk[m]:
-                            ret_merge_chunk[m][key] = [ret[key].cpu(), ]
-                        else:
-                            ret_merge_chunk[m][key].append(ret[key].cpu())
+    checknan(**ret)
 
-                        ret[key] = None
+    for m in range(models['cascade_level']):
+        if m == 0:
+            continue
 
-            # clean unused memory
-            torch.cuda.empty_cache()
+        net = models['net_{}'.format(m)]
+        samples = models['cascade_samples'][m]
 
-    # merge results from different chunks
-    for m in range(len(ret_merge_chunk)):
-        for key in ret_merge_chunk[m]:
-            ret_merge_chunk[m][key] = torch.cat(ret_merge_chunk[m][key], dim=0)
+        ret, fg_query_depths, bg_depth = eval_pass(ray_o, ray_d, box_loc, net, samples,
+                                            ret['fg_weights'], ret['bg_weights'],
+                                            fg_far_depth, fg_query_depths, bg_depth)
+        checknan(**ret)
 
-    # merge results from different processes
-    if rank == 0:
-        ret_merge_rank = [OrderedDict() for _ in range(len(ret_merge_chunk))]
-        for m in range(len(ret_merge_chunk)):
-            for key in ret_merge_chunk[m]:
-                # generate tensors to store results from other processes
-                sh = list(ret_merge_chunk[m][key].shape[1:])
-                ret_merge_rank[m][key] = [torch.zeros(*[size,]+sh, dtype=torch.float32) for size in rank_split_sizes]
-                torch.distributed.gather(ret_merge_chunk[m][key], ret_merge_rank[m][key])
-                ret_merge_rank[m][key] = torch.cat(ret_merge_rank[m][key], dim=0).reshape(
-                                            (ray_sampler.H, ray_sampler.W, -1)).squeeze()
-                # print(m, key, ret_merge_rank[m][key].shape)
-    else:  # send results to main process
-        for m in range(len(ret_merge_chunk)):
-            for key in ret_merge_chunk[m]:
-                torch.distributed.gather(ret_merge_chunk[m][key])
-
-    # only rank 0 program returns
-    if rank == 0:
-        return ret_merge_rank
-    else:
-        return None
+    return ret
 
 
 def log_view_to_tb(writer, global_step, log_data, gt_img, mask, train_box_only= False, prefix=''):
@@ -289,12 +260,8 @@ def cleanup():
     torch.distributed.destroy_process_group()
 
 
-def create_nerf(rank, args):
-    ###### create network and wrap in ddp; each process should do this
-    # fix random seed just to make sure the network is initialized with same weights at different processes
+def create_nerf(args, cuda_device='cuda:0'):
     torch.manual_seed(777)
-    # very important!!! otherwise it might introduce extra memory in rank=0 gpu
-    torch.cuda.set_device(rank)
 
     models = OrderedDict()
     models['cascade_level'] = args.cascade_level
@@ -307,21 +274,17 @@ def create_nerf(rank, args):
             with open(f) as file:
                 img_names = json.load(file)
         if args.train_box_only:
-            net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+            net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(cuda_device)
         elif args.have_box:
-            net = NerfNetBoxWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
-            # net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+            net = NerfNetBoxWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(cuda_device)
         else:
-            net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
-        net = DDP(net, device_ids=[rank], output_device=rank, find_unused_parameters=True)
-        # net = DDP(net, device_ids=[rank], output_device=rank)
+            net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(cuda_device)
         optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
-        models['net_{}'.format(m)] = net
+        models['net_{}'.format(m)] = WrapperModule(net)
         models['optim_{}'.format(m)] = optim
 
     start = -1
 
-    ###### load pretrained weights; each process should do this
     if (args.ckpt_path is not None) and (os.path.isfile(args.ckpt_path)):
         ckpts = [args.ckpt_path]
     else:
@@ -336,41 +299,16 @@ def create_nerf(rank, args):
     ckpts = sorted(ckpts, key=path2iter)
     logger.info('Found ckpts: {}'.format(ckpts))
     if len(ckpts) > 0 and not args.no_reload:
-
-
         fpath = ckpts[-1]
         logger.info('Reloading from: {}'.format(fpath))
         start = path2iter(fpath)
-        # configure map_location properly for different processes
-        map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
-        to_load = torch.load(fpath, map_location=map_location)
+        to_load = torch.load(fpath, map_location='cpu')
 
         for m in range(models['cascade_level']):
-            for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-                models[name].load_state_dict(to_load[name])
-
-    else:
-
-        map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
-        # fpath_box = '/home/sally/nerf/nerfplusplus/logs/box_300_2-1_fullview_sc0.5_mx100-140/model_485000.pth'
-        # fpath_sc = '/home/sally/nerf/nerfplusplus/logs/newinter_10x10x18_npp/model_770000.pth'
-
-        fpath_box = '/home/sally/nerfpp/box_models/box_model_485000.pth'
-        fpath_sc = '/home/sally/nerfpp/box_models/bg_model_770000.pth'
-
-        to_load_box = torch.load(fpath_box, map_location=map_location)
-        to_load_sc = torch.load(fpath_sc, map_location=map_location)
-
-        for m in range(models['cascade_level']):
-            # for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-            for name in ['net_{}'.format(m)]:
-                for k in to_load_box[name].keys():
-                    to_load_sc[name][k] = to_load_box[name][k]
-
-                # models[name].load_state_dict(to_load_box[name])
-                models[name].load_state_dict(to_load_sc[name])
-
-
+            optim_name = 'optim_{}'.format(m)
+            net_name = 'net_{}'.format(m)
+            models[optim_name].load_state_dict(to_load[optim_name])
+            models[net_name].load_state_dict(to_load[net_name])
 
     return start, models
 

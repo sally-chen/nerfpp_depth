@@ -4,6 +4,8 @@ import torch
 import cv2
 import imageio
 
+from utils import tile
+
 ########################################################################################################################
 # ray batch sampling
 ########################################################################################################################
@@ -20,19 +22,39 @@ def get_rays_single_image(H, W, intrinsics, c2w):
     u = u.reshape(-1).astype(dtype=np.float32) + 0.5    # add half pixel
     v = v.reshape(-1).astype(dtype=np.float32) + 0.5
     pixels = np.stack((u, v, np.ones_like(u)), axis=0)  # (3, H*W)
+    pixels = torch.from_numpy(pixels).to(c2w.device)
 
-    rays_d = np.dot(np.linalg.inv(intrinsics[:3, :3]), pixels)
-    rays_d = np.dot(c2w[:3, :3], rays_d)  # (3, H*W)
-    rays_d = rays_d.transpose((1, 0))  # (H*W, 3)
+    rays_d = torch.matmul(torch.inverse(intrinsics[:3, :3]), pixels)
+    rays_d = torch.matmul(c2w[:3, :3], rays_d)  # (3, H*W)
+    rays_d = rays_d.transpose(1, 0)  # (H*W, 3)
 
-    rays_o = c2w[:3, 3].reshape((1, 3))
-    rays_o = np.tile(rays_o, (rays_d.shape[0], 1))  # (H*W, 3)
+    rays_o = c2w[:3, 3].view(1, 3)
+    rays_o = rays_o.expand(rays_d.shape[0], -1)  # (H*W, 3)
 
-    depth = np.linalg.inv(c2w)[2, 3]
-    depth = depth * np.ones((rays_o.shape[0],), dtype=np.float32)  # (H*W,)
+    depth = torch.inverse(c2w)[2, 3]
+    depth = depth * torch.ones(rays_o.shape[0], device=c2w.device)  # (H*W,)
 
     return rays_o, rays_d, depth
 
+def get_rays_scan(H, W, c2w):
+    phi = np.linspace(-np.pi, np.pi, W).astype(dtype=np.float32)
+    theta = np.linspace(-np.pi/4, np.pi/4, H,).astype(dtype=np.float32)
+
+    pv, tv = np.meshgrid(phi, theta)
+    x = np.cos(pv) * np.cos(tv)
+    y = np.cos(pv) * np.sin(tv)
+    z = np.sin(pv)
+
+    rays_d = torch.from_numpy(np.stack([x, y, z]).reshape(3, -1)).to(c2w.device)
+    rays_d = c2w[:3, :3].matmul(rays_d).T
+
+    rays_o = c2w[:3, 3].reshape((1, 3))
+    rays_o = rays_o.expand(rays_d.shape[0], -1)
+
+    depth = torch.inverse(c2w)[2, 3]
+    depth = depth * torch.ones((rays_o.shape[0],)).to(c2w.device)  # (H*W,)
+
+    return rays_o, rays_d, depth
 
 class RaySamplerSingleImage(object):
     def __init__(self, H, W, intrinsics, c2w,
@@ -41,7 +63,8 @@ class RaySamplerSingleImage(object):
                        mask_path=None,
                        min_depth_path=None,
                        max_depth=None,
-                       box_loc=None):
+                       box_loc=None,
+                       lidar_image=False):
         super().__init__()
         self.W_orig = W
         self.H_orig = H
@@ -53,18 +76,30 @@ class RaySamplerSingleImage(object):
         self.min_depth_path = min_depth_path
         self.max_depth = max_depth
 
-        self.resolution_level = -1
-        self.set_resolution_level(resolution_level)
-
+        if lidar_image:
+            self.resolution_level = 1
+            self.configure_lidar_image()
+        else:
+            self.resolution_level = -1
+            self.set_resolution_level(resolution_level)
 
         self.box_loc = box_loc
+
+    def configure_lidar_image(self):
+        self.H = self.H_orig
+        self.W = self.W_orig
+        self.img = None
+        self.mask = None
+        self.min_depth = None
+        self.rays_o, self.rays_d, self.depth = get_rays_scan(self.H, self.W,
+                                                              self.c2w_mat)
 
     def set_resolution_level(self, resolution_level):
         if resolution_level != self.resolution_level:
             self.resolution_level = resolution_level
             self.W = self.W_orig // resolution_level
             self.H = self.H_orig // resolution_level
-            self.intrinsics = np.copy(self.intrinsics_orig)
+            self.intrinsics = torch.clone(self.intrinsics_orig)
             self.intrinsics[:2, :3] /= resolution_level
             # only load image at this time
             if self.img_path is not None:
@@ -101,7 +136,7 @@ class RaySamplerSingleImage(object):
         if self.min_depth is not None:
             min_depth = self.min_depth
         else:
-            min_depth = 1e-4 * np.ones_like(self.rays_d[..., 0])
+            min_depth = 1e-4 * torch.ones_like(self.rays_d[..., 0])
 
         ret = OrderedDict([
             ('ray_o', self.rays_o),
@@ -110,12 +145,14 @@ class RaySamplerSingleImage(object):
             ('rgb', self.img),
             ('mask', self.mask),
             ('min_depth', min_depth),
-            ('box_loc', np.tile(self.box_loc, (self.rays_d.shape[0],1)))
+            ('box_loc', self.box_loc.expand(self.rays_d.shape[0], -1))
         ])
+
         # return torch tensors
         for k in ret:
-            if ret[k] is not None:
+            if ret[k] is not None and not torch.is_tensor(ret[k]):
                 ret[k] = torch.from_numpy(ret[k])
+
         return ret
 
     def random_sample(self, N_rand, center_crop=False):
@@ -164,18 +201,19 @@ class RaySamplerSingleImage(object):
             min_depth = 1e-4 * np.ones_like(rays_d[..., 0])
 
         ret = OrderedDict([
-            ('ray_o', rays_o),
-            ('ray_d', rays_d),
-            ('depth', depth),
+            ('ray_o', rays_o.numpy()),
+            ('ray_d', rays_d.numpy()),
+            ('depth', depth.numpy()),
             ('rgb', rgb),
             ('mask', mask),
-            ('min_depth', min_depth),
+            ('min_depth', min_depth.numpy()),
             ('img_name', self.img_path),
-            ('box_loc', box_loc)
+            ('box_loc', box_loc.numpy())
         ])
         # return torch tensors
         for k in ret:
             if isinstance(ret[k], np.ndarray):
                 ret[k] = torch.from_numpy(ret[k])
+
 
         return ret
