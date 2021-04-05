@@ -129,13 +129,13 @@ def sample_pdf(bins, weights, N_samples, det=False):
 
     return samples
 
-@torch.no_grad()
+#@torch.no_grad()
 def eval_fg_pass(ray_o, ray_d, box_loc, fg_net, N_samples, fg_far_depth, fg_query_depths, bg_depth):
     ret = fg_net(ray_o, ray_d, fg_far_depth, fg_query_depths, bg_depth, box_loc)
 
     return ret
 
-@torch.no_grad()
+#@torch.no_grad()
 def eval_pass(ray_o, ray_d, box_loc, net, samples, fg_weights, bg_weights, fg_far_depth, fg_depth, bg_depth):
     fg_weights = fg_weights.detach()
     fg_depth_mid = .5 * (fg_depth[..., 1:] + fg_depth[..., :-1])    # [..., N_samples-1]
@@ -309,6 +309,8 @@ def create_nerf(args, cuda_device='cuda:0'):
             net_name = 'net_{}'.format(m)
             models[optim_name].load_state_dict(to_load[optim_name])
             models[net_name].load_state_dict(to_load[net_name])
+            for param in models[net_name].parameters():
+                param.requires_grad_(False)
 
     return start, models
 

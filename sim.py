@@ -44,15 +44,14 @@ class Sim:
 
             # only save last level
             im = ret['rgb']
-            images.append(im)
+#            images.append(im)
 
             im = ret['depth_fgbg']
             im[im > max_depth] = max_depth  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
-            depths.append(im)
+#            depths.append(im)
+
 
             torch.cuda.empty_cache()
-
-        return torch.stack(images), torch.stack(depths)
 
 
 def test():
@@ -83,7 +82,7 @@ def test():
 
 
     sim = Sim(args)
-    rgb, d = sim.run(intrs, poses, locs, H, W)
+    rgb, d = sim.run(intrs, poses, locs, 32, 100)
 
 
 if __name__ == '__main__':
