@@ -40,8 +40,8 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True):
 
     for i in range(len(poses)):
         intrinsics = intrs[i]
-        pose = poses[i]
-        loc = locs[i]
+        pose = poses[i].clone()
+        loc = locs[i].clone() # cloning incase these are leaf variables..
 
         if normalize:
             max = torch.tensor([100., 140.], device=pose.device)

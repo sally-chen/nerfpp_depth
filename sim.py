@@ -46,10 +46,11 @@ class Sim:
             im = ret['rgb']
 #            images.append(im)
 
-            im = ret['depth_fgbg']
-            im[im > max_depth] = max_depth  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
+            d = ret['depth_fgbg']
+            d[d > max_depth] = max_depth  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
 #            depths.append(im)
 
+            return im, d
 
             torch.cuda.empty_cache()
 
@@ -77,12 +78,16 @@ def test():
     depth_clip = 60.  # clip depth
 
     intrs = [torch.from_numpy(intr).to('cuda:0') for intr in intrs]
-    poses = [torch.from_numpy(pose).to('cuda:0') for pose in poses]
-    locs = [torch.from_numpy(loc).to('cuda:0') for loc in locs]
+    poses = [torch.from_numpy(pose).to('cuda:0').requires_grad_(True) for pose in poses]
+    locs = [torch.from_numpy(loc).to('cuda:0').requires_grad_(True) for loc in locs]
 
 
     sim = Sim(args)
-    rgb, d = sim.run(intrs, poses, locs, 32, 100)
+    rgb, d = sim.run(intrs[:1], poses[:1], locs[:1], 32, 100)
+    y = d.sum()
+    y.backward()
+    print(poses[0].grad)
+
 
 
 if __name__ == '__main__':
