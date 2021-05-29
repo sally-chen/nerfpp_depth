@@ -5,7 +5,7 @@ import numpy as np
 # import numpy as np
 from utils import TINY_NUMBER, HUGE_NUMBER
 from collections import OrderedDict
-from nerf_network import Embedder, MLPNet
+from nerf_network import Embedder, MLPNet, MLPNetClassier
 import os
 import logging
 logger = logging.getLogger(__package__)
@@ -41,9 +41,204 @@ def depth2pts_outside(ray_o, ray_d, depth):
     p_sphere_new = p_sphere_new / torch.norm(p_sphere_new, dim=-1, keepdim=True)
     pts = torch.cat((p_sphere_new, depth.unsqueeze(-1)), dim=-1)
 
+
+
     # now calculate conventional depth
     depth_real = 1. / (depth + TINY_NUMBER) * torch.cos(theta) * ray_d_cos + d1
     return pts, depth_real
+
+def depth2pts_outside_np(ray_o, ray_d, depth):
+    '''
+    ray_o, ray_d: [..., 3]
+    depth: [...]; inverse of distance to sphere origin
+    '''
+    # note: d1 becomes negative if this mid point is behind camera
+    d1 = -np.sum(ray_d * ray_o, axis=-1) / np.sum(ray_d * ray_d, axis=-1)   # tb
+    p_mid = ray_o + d1[...,None] * ray_d #b
+    p_mid_norm = np.linalg.norm(p_mid, axis=-1)
+    ray_d_cos = 1. / (np.linalg.norm(ray_d, axis=-1)+0.0001)
+    d2 = np.sqrt(1. - p_mid_norm * p_mid_norm) * ray_d_cos
+    p_sphere = ray_o + (d1 + d2)[...,None] * ray_d
+
+    rot_axis = np.cross(ray_o, p_sphere, axis=-1)
+    rot_axis = rot_axis / (np.linalg.norm(rot_axis, axis=-1, keepdims=True)+0.0001)
+    phi = np.arcsin(p_mid_norm)
+    theta = np.arcsin(p_mid_norm[...,None] * depth)  # depth is inside [0, 1]
+    rot_angle = (phi[..., None]  - theta)[..., None]     # [..., 1]
+
+    # now rotate p_sphere
+    # Rodrigues formula: https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
+
+
+    # print("p_sphere:{} rot_angle {} rot_axis {}".format(p_sphere.shape,rot_angle.shape,rot_axis.shape))
+
+    term1 = p_sphere[...,None,:] * np.cos(rot_angle)
+    term2 = np.cross(rot_axis, p_sphere, axis=-1)[...,None,:]* np.sin(rot_angle)
+    term3 = (rot_axis * np.sum(rot_axis*p_sphere, axis=-1, keepdims=True))[...,None,:] * (1.-np.cos(rot_angle))
+    p_sphere_new = term1 + term2 + term3
+    p_sphere_new = p_sphere_new / np.linalg.norm(p_sphere_new, axis=-1, keepdims=True)
+    pts = np.concatenate((p_sphere_new, depth[...,None]), axis=-1)
+    # now calculate conventional depth
+    depth_real = 1. / (depth + TINY_NUMBER) * np.cos(theta) * ray_d_cos[...,None] + d1[...,None]
+    return pts, depth_real
+
+
+class DepthOracleBig(nn.Module):
+
+    def __init__(self, args):
+        super().__init__()
+
+
+        self.pencode = args.pencode
+        self.use_zval = args.use_zval
+
+        if self.use_zval:
+            pos_ch = args.front_sample - 1  + args.back_sample - 1
+        else:
+            pos_ch = (args.front_sample - 1) * 3 + (args.back_sample - 1) * 4
+
+        if self.pencode:
+            self.embedder_position = Embedder(input_dim=3,
+                                              max_freq_log2=args.max_freq_log2 - 1,
+                                              N_freqs=args.max_freq_log2)
+            self.embedder_viewdir = Embedder(input_dim=3,
+                                             max_freq_log2=args.max_freq_log2_viewdirs - 1,
+                                             N_freqs=args.max_freq_log2_viewdirs)
+
+            self.ora_net = MLPNetClassier(input_ch=self.embedder_position.out_dim, input_ch_viewdirs=self.embedder_viewdir.out_dim, D=args.netdepth,
+                                          W=args.netwidth,
+                                          pos_ch=pos_ch,
+                                          out_dim=args.front_sample + args.back_sample)
+
+        else:
+            self.ora_net = MLPNetClassier(input_ch=3 , input_ch_viewdirs=3 , D=args.netdepth,
+                                          W=args.netwidth,
+                                          pos_ch=pos_ch,
+                                          out_dim=args.front_sample + args.back_sample)
+
+    def forward(self, ray_o, ray_d, points):
+        '''
+       :param ray_o, ray_d: [N_rays, 3]
+       :param cls_label: [N_rays, N_samples]
+       :param points: [N_rays, 3*N_front_sample +4 * N_back_samples]
+       :return
+       '''
+
+
+
+        ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
+        viewdirs = ray_d / ray_d_norm  # [..., 3]
+        if self.pencode:
+            viewdirs = self.embedder_viewdir(viewdirs)
+            ray_o = self.embedder_position(ray_o)
+
+        # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
+
+        depth_likeli = self.ora_net(ray_o,viewdirs, points)
+
+        ret = OrderedDict([('likeli', depth_likeli)])
+        return ret
+
+
+class DepthOracle(nn.Module):
+
+    def __init__(self, args):
+        super().__init__()
+
+        self.pencode = args.pencode
+        self.penc_pts = args.penc_pts
+
+        self.use_zval = args.use_zval
+
+        if self.use_zval:
+            pos_ch_fg = args.front_sample - 1
+            pos_ch_bg = args.back_sample - 1
+        else:
+            pos_ch_fg = (args.front_sample - 1) * 3
+            pos_ch_bg = (args.back_sample - 1) * 4
+
+        if self.penc_pts:
+
+
+
+            self.embedder_pts = Embedder(input_dim=pos_ch_fg,
+                                              max_freq_log2=args.max_freq_log2_pts - 1,
+                                              N_freqs=args.max_freq_log2_pts)
+
+            self.embedder_pts_bg = Embedder(input_dim=pos_ch_bg,
+                                         max_freq_log2=args.max_freq_log2_pts - 1,
+                                         N_freqs=args.max_freq_log2_pts)
+            pos_ch_fg  = self.embedder_pts.out_dim
+            pos_ch_bg  = self.embedder_pts_bg.out_dim
+
+        if self.pencode:
+            self.embedder_position = Embedder(input_dim=3,
+                                              max_freq_log2=args.max_freq_log2 - 1,
+                                              N_freqs=args.max_freq_log2)
+            self.embedder_viewdir = Embedder(input_dim=3,
+                                             max_freq_log2=args.max_freq_log2_viewdirs - 1,
+                                             N_freqs=args.max_freq_log2_viewdirs)
+
+
+
+            self.ora_net_fg = MLPNetClassier(input_ch=self.embedder_position.out_dim,
+                                          input_ch_viewdirs=self.embedder_viewdir.out_dim, D=args.netdepth,
+                                          W=args.netwidth,
+                                          pos_ch=pos_ch_fg,
+                                          out_dim=args.front_sample )
+
+            self.embedder_position_bg = Embedder(input_dim=3,
+                                              max_freq_log2=args.max_freq_log2 - 1,
+                                              N_freqs=args.max_freq_log2)
+
+            self.ora_net_bg = MLPNetClassier(input_ch=self.embedder_position_bg.out_dim,
+                                          input_ch_viewdirs=self.embedder_viewdir.out_dim, D=args.netdepth,
+                                          W=args.netwidth,
+                                          pos_ch=pos_ch_bg,
+                                          out_dim= args.back_sample)
+        else:
+
+            self.ora_net_fg = MLPNetClassier(D=args.netdepth, W=args.netwidth,
+                                          pos_ch=pos_ch_fg,
+                                          out_dim=args.front_sample )
+
+            self.ora_net_bg = MLPNetClassier(D=args.netdepth, W=args.netwidth,
+                                             pos_ch= pos_ch_bg,
+                                             out_dim=args.back_sample)
+
+    def forward(self, ray_o, ray_d, points_fg, points_bg, fg_far_depth):
+        '''
+       :param ray_o, ray_d: [N_rays, 3]
+       :param cls_label: [N_rays, N_samples]
+       :param points: [N_rays, 3*N_front_sample +4 * N_back_samples]
+       :return
+       '''
+
+        # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
+        ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
+        viewdirs = ray_d / ray_d_norm  # [..., 3]
+
+        ray_o_bg = ray_o + ray_d * fg_far_depth.unsqueeze(-1)
+
+        if self.pencode:
+            viewdirs = self.embedder_viewdir(viewdirs)
+            ray_o = self.embedder_position(ray_o)
+            ray_o_bg = self.embedder_position_bg(ray_o_bg)
+
+        if self.penc_pts:
+            points_fg  = self.embedder_pts(points_fg)
+            points_bg  = self.embedder_pts_bg(points_bg)
+
+
+        depth_likeli_fg = self.ora_net_fg(ray_o, viewdirs, points_fg)
+        depth_likeli_bg = self.ora_net_bg(ray_o_bg, viewdirs, points_bg)
+
+
+        ret = OrderedDict([('likeli_fg', depth_likeli_fg), ('likeli_bg', depth_likeli_bg)])
+
+        return ret
+
+
 
 
 class NerfNet(nn.Module):
@@ -139,14 +334,14 @@ class NerfNet(nn.Module):
         bg_depth_map = bg_lambda * bg_depth_map
         depth_map = fg_depth_map + bg_depth_map
         
-        device = torch.cuda.device('cuda:0')
-        max = torch.tensor([100., 140.], device=torch.device('cuda:0'))
-        min = torch.tensor([85., 125.], device=torch.device('cuda:0'))
-        avg_pose = torch.tensor([0.5,  0.5], device=torch.device('cuda:0'))
-
-        depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (max-min) + min
-        ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
-        depth_map = torch.norm(depth_pt_denorm[:,:2] - ro_denorm, dim=1, keepdim=False) 
+        # device = torch.cuda.device('cuda:0')
+        # max = torch.tensor([100., 140.], device=torch.device('cuda:0'))
+        # min = torch.tensor([85., 125.], device=torch.device('cuda:0'))
+        # avg_pose = torch.tensor([0.5,  0.5], device=torch.device('cuda:0'))
+        #
+        # depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (max-min) + min
+        # ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
+        # depth_map = torch.norm(depth_pt_denorm[:,:2] - ro_denorm, dim=1, keepdim=False)
 
                                                                  
         ret = OrderedDict([('rgb', rgb_map),            # loss
@@ -394,6 +589,38 @@ def remap_name(name):
             idx = name[:idx].rfind('/')
     return name[idx + 1:]
 
+class NerfNetWithAutoExpo(nn.Module):
+    def __init__(self, args, optim_autoexpo=False, img_names=None):
+        super().__init__()
+        self.nerf_net = NerfNet(args)
+
+        self.optim_autoexpo = optim_autoexpo
+        if self.optim_autoexpo:
+            assert(img_names is not None)
+            logger.info('Optimizing autoexposure!')
+
+            self.img_names = [remap_name(x) for x in img_names]
+            logger.info('\n'.join(self.img_names))
+            self.autoexpo_params = nn.ParameterDict(OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
+
+    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, img_name=None):
+        '''
+        :param ray_o, ray_d: [..., 3]
+        :param fg_z_max: [...,]
+        :param fg_z_vals, bg_z_vals: [..., N_samples]
+        :return
+        '''
+        ret = self.nerf_net(ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals)
+
+        if img_name is not None:
+            img_name = remap_name(img_name)
+        if self.optim_autoexpo and (img_name in self.autoexpo_params):
+            autoexpo = self.autoexpo_params[img_name]
+            scale = torch.abs(autoexpo[0]) + 0.5 # make sure scale is always positive
+            shift = autoexpo[1]
+            ret['autoexpo'] = (scale, shift)
+
+        return ret
 
 class NerfNetWithAutoExpo(nn.Module):
     def __init__(self, args, optim_autoexpo=False, img_names=None):

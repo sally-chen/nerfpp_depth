@@ -58,7 +58,7 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True):
     return ray_samplers
     # max_depth=max_depth, box_loc=locs[i]))
 
-def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False, have_box = False, train_depth=False):
+def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False, have_box = False, train_depth=False, custom_rays=None):
 
     def parse_txt(filename):
         assert os.path.isfile(filename)
@@ -162,12 +162,32 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     H, W = train_im.shape[:2]
     #H, W = 90, 160
 
+    if custom_rays:
+        import pickle
+        ray_samplers = []
+        rays_li = pickle.load(open('./ray_list', 'rb'))
+
+        for ray in rays_li:
+            loc = np.array([ -0.2477,-0.0833, -1.])
+            ray_samplers.append(RaySamplerSingleImage(H=100, W=32, rays=ray, box_loc = loc))
+
+        return ray_samplers
+
+
+
     # create ray samplers
     ray_samplers = []
     poses = []
     intrins = []
     locs = []
+
+    ## tmp ##
+    # if cam_cnt > 20:
+    #     cam_cnt = 20
+    ## tmp ##
     for i in range(cam_cnt):
+
+        print(i)
         intrinsics = parse_txt(intrinsics_files[i])
         pose = parse_txt(pose_files[i])
 
@@ -200,30 +220,31 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       mask_path=mask_files[i],
                                                       min_depth_path=mindepth_files[i],
                                                       max_depth=max_depth, box_loc=loc,
-                                                      depth_path=depth_files[i]))
+                                                      depth_path=depth_files[i]),
+                                                    make_class_label=False)
                                                       # max_depth=max_depth, box_loc=locs[i]))
         else:
-            ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
+            ray_samplers.append(RaySamplerSingleImage(H=360, W=640, intrinsics=intrinsics, c2w=pose,
                                                       img_path=img_files[i],
                                                       mask_path=mask_files[i],
                                                       min_depth_path=mindepth_files[i],
-                                                      max_depth=max_depth, depth_path=depth_files[i]
-                                                      ))
+                                                      max_depth=max_depth, depth_path=depth_files[i],
+                                                      make_class_label=False))
 
     logger.info('Split {}, # views: {}'.format(split, cam_cnt))
 
     #
-    if not have_box:
-        plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
-                        ['scene poses'])
-    
-    else:
-        dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
-        locs = np.stack(locs, axis=0)
-        dummy_pose_loc[:,:3, 3] = locs
-        plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
-                       ['scene poses','box'])
+    # if not have_box:
+    #     plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
+    #                     ['scene poses'])
     #
+    # else:
+    #     dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
+    #     locs = np.stack(locs, axis=0)
+    #     dummy_pose_loc[:,:3, 3] = locs
+    #     plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
+    #                    ['scene poses','box'])
+    # #
     #
     # ## denorm first and save for test ##
     #
@@ -240,4 +261,6 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     # outfile = open(filename, 'wb')
     # pickle.dump([poses, intrins, locs], outfile)
     # outfile.close()
+
+    print("finished getting rays")
     return ray_samplers

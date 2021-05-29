@@ -1,0 +1,57 @@
+### INPUT
+datadir = ./data/
+scene = big_inters_nom15_samp4x4_nobox
+expname = donerf_pretrain_skiprayod_fgbg_uniro_lr00005_Dfilter_netred_penc_usezval_entropy
+
+basedir = ./logs
+config = None
+ckpt_path = None
+no_reload = False
+testskip = 1
+
+### TRAINING
+N_iters = 1000001
+N_rand = 4096
+lrate = 0.00005
+lrate_decay_factor = 0.1
+lrate_decay_steps = 5000
+
+### CASCADE
+cascade_level = 1
+cascade_samples = 32
+
+### TESTING
+chunk_size = 8192
+
+### RENDERING
+det = False
+max_freq_log2 = 10 # 10
+max_freq_log2_viewdirs = 4 # 4
+netdepth = 8
+netwidth = 256
+use_viewdirs = True
+
+### CONSOLE AND TENSORBOARD
+i_img = 500
+i_print = 100
+i_weights = 5000
+
+
+have_box = False
+train_box_only = False
+depth_training = False
+donerf_pretrain = True
+
+front_sample = 128
+back_sample = 128
+
+fg_bg_net = True
+
+pencode = True
+use_zval = True
+
+penc_pts = False
+max_freq_log2_pts = 3
+
+
+

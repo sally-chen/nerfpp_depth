@@ -66,6 +66,159 @@ def weights_init(m):
         if m.bias is not None:
             nn.init.zeros_(m.bias.data)
 
+class MLPNetClassier(nn.Module):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_viewdirs=3, pos_ch=128*3, out_dim=128,
+                 skips=[4], use_viewdirs=False):
+
+        '''
+               :param D: network depth
+               :param W: network width
+               :param input_ch: input channels for encodings of (x, y, z)
+               :param input_ch_viewdirs: input channels for encodings of view directions
+               :param skips: skip connection in network
+               :param use_viewdirs: if True, will use the view directions as input
+               '''
+        super().__init__()
+
+        self.input_ch = input_ch +input_ch_viewdirs
+        self.input_ch_viewdirs = input_ch_viewdirs
+
+
+        self.pos_ch = pos_ch
+        self.out_dim = out_dim
+
+        self.use_viewdirs = use_viewdirs
+        self.skips = skips
+
+        self.base_layers = []
+        dim = self.input_ch  + self.pos_ch
+        for i in range(D):
+            self.base_layers.append(
+                nn.Sequential(nn.Linear(dim, W), nn.ReLU())
+            )
+            dim = W
+            if i in self.skips and i != (D - 1):  # skip connection after i^th layer
+                dim += self.input_ch
+
+        self.base_layers = nn.ModuleList(self.base_layers)
+        # self.base_layers.apply(weights_init)        # xavier init
+
+        base_remap_layers = [nn.Linear(dim, self.out_dim), nn.Sigmoid()]
+        # base_remap_layers = [nn.Sigmoid(),]
+        self.base_remap_layers = nn.Sequential(*base_remap_layers)
+        # self.base_remap_layers.apply(weights_init)
+
+    def forward(self, ray_o, ray_d, positions):
+        '''
+        :param ray_o: [..., 3]
+        :param ray_d: [..., 3]
+        :param positions: [..., 128 *  3]
+        :return [..., 128] occupancy likelihood
+        '''
+        input_pts = torch.cat((ray_o, ray_d, positions), dim=-1)
+        input_pts_skip = torch.cat((ray_o, ray_d), dim=-1)
+
+        base = self.base_layers[0](input_pts)
+        for i in range(len(self.base_layers) - 1):
+            if i in self.skips:
+                base = torch.cat((input_pts_skip, base), dim=-1)
+            base = self.base_layers[i + 1](base)
+
+        # print("----------")
+        #
+        # print(base)
+        #
+        # for lay in self.base_remap_layers:
+        #     base = lay(base)
+        #     print(base)
+        #
+        # occ_likeli = base
+
+
+        occ_likeli = self.base_remap_layers(base)
+
+        return occ_likeli
+
+
+
+class MLPNetClassierOld(nn.Module):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_viewdirs=3, pos_ch=128*3, out_dim=128,
+                 skips=[4], use_viewdirs=False):
+
+        '''
+               :param D: network depth
+               :param W: network width
+               :param input_ch: input channels for encodings of (x, y, z)
+               :param input_ch_viewdirs: input channels for encodings of view directions
+               :param skips: skip connection in network
+               :param use_viewdirs: if True, will use the view directions as input
+               '''
+        super().__init__()
+
+        self.input_ch = input_ch +input_ch_viewdirs
+        self.input_ch_viewdirs = input_ch_viewdirs
+
+
+        self.pos_ch = pos_ch
+        self.out_dim = out_dim
+
+        self.use_viewdirs = use_viewdirs
+        self.skips = skips
+
+        self.base_layers = []
+        dim = self.input_ch  + self.pos_ch
+        for i in range(D):
+            self.base_layers.append(
+                nn.Sequential(nn.Linear(dim, W), nn.ReLU())
+            )
+            dim = W
+            if i in self.skips and i != (D - 1):  # skip connection after i^th layer
+                dim += self.input_ch
+
+        self.base_layers = nn.ModuleList(self.base_layers)
+        # self.base_layers.apply(weights_init)        # xavier init
+
+        # rgb color
+        rgb_layers = []
+        base_remap_layers = [nn.Linear(dim, 256), ]
+        self.base_remap_layers = nn.Sequential(*base_remap_layers)
+        # self.base_remap_layers.apply(weights_init)
+
+        dim = 256 + self.input_ch_viewdirs
+        for i in range(1):
+            rgb_layers.append(nn.Linear(dim, W // 2))
+            rgb_layers.append(nn.ReLU())
+            dim = W // 2
+
+
+        rgb_layers.append(nn.Linear(dim, self.out_dim))
+        rgb_layers.append(nn.Sigmoid())  # rgb values are normalized to [0, 1]
+        self.rgb_layers = nn.Sequential(*rgb_layers)
+        # self.rgb_layers.apply(weights_init)
+
+
+    def forward(self, ray_o, ray_d, positions):
+        '''
+        :param ray_o: [..., 3]
+        :param ray_d: [..., 3]
+        :param positions: [..., 128 *  3]
+        :return [..., 128] occupancy likelihood
+        '''
+        input_pts = torch.cat((ray_o, ray_d, positions), dim=-1)
+        input_pts_skip = torch.cat((ray_o, ray_d), dim=-1)
+
+        base = self.base_layers[0](input_pts)
+        for i in range(len(self.base_layers) - 1):
+            if i in self.skips:
+                base = torch.cat((input_pts_skip, base), dim=-1)
+            base = self.base_layers[i + 1](base)
+
+        base_remap = self.base_remap_layers(base)
+        occ_likeli = self.rgb_layers(torch.cat((base_remap, ray_d), dim=-1))
+
+        return occ_likeli
+
+
 
 class MLPNet(nn.Module):
     def __init__(self, D=8, W=256, input_ch=3, input_ch_viewdirs=3,
