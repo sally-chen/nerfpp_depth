@@ -1,6 +1,10 @@
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+import PIL.Image
+from torchvision.transforms import ToTensor
+import io
 
 
 def plot_mult_pose(poses_list, name, labels):
@@ -64,3 +68,127 @@ def plot_ray_batch(batch):
     name = r'sampled_poses'
     plt.title(name)
     plt.show()
+
+
+def calculate_metrics(pred, target, avg_method='micro', threshold=0.5, zero_division=0):
+
+    pred = np.array(pred > threshold, dtype=float)
+    target = np.array(target > threshold, dtype=float)
+
+
+    return {'precision': precision_score(y_true=target, y_pred=pred, average=avg_method,zero_division=0),
+            'recall': recall_score(y_true=target, y_pred=pred, average=avg_method,zero_division=0),
+            'f1': f1_score(y_true=target, y_pred=pred, average=avg_method,zero_division=0)}
+            # 'cm':confusion_matrix(target, pred)}
+
+def log_plot_conf_mat(writer, cm, step, name):
+    labels = [str(i) for i in range(cm.shape[0])]
+    print(cm)
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    cax = ax.matshow(cm)
+    plt.title('Confusion matrix of the classifier')
+    fig.colorbar(cax)
+    ax.set_xticklabels([''] + labels)
+    ax.set_yticklabels([''] + labels)
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='jpeg')
+    buf.seek(0)
+
+    image = PIL.Image.open(buf)
+    image = ToTensor()(image).unsqueeze(0)
+
+    writer.add_image(name, image, step)
+
+
+def visualize_depth_label(writer, label, pred, step, name):
+    fig = plt.figure(figsize=(15,8))
+
+    pos = [str(i) for i in range(label.shape[1])]
+
+    ax_label = fig.add_subplot(121)
+    pcm_label = ax_label.matshow(label)
+    ax_label.set_title("Depth Label")
+    # ax_label.set_xticklabels([''] + pos)
+
+
+
+    ax_pred = fig.add_subplot(122)
+    pcm_pred = ax_pred.matshow(pred)
+    ax_pred.set_title("Depth Pred")
+    # ax_pred.set_xticklabels([''] + pos)
+
+
+
+    # plt.title('Prob Distribution of Depth Label vs Prediction')
+    # cax=plt.imshow()
+    plt.colorbar(pcm_label, ax=ax_label)
+
+    plt.colorbar(pcm_pred, ax=ax_pred)
+
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='jpeg')
+
+    plt.clf()
+    plt.close(fig)
+    buf.seek(0)
+
+    image = PIL.Image.open(buf)
+    image = ToTensor()(image)
+
+    writer.add_image(name, image, step)
+
+def loss_deviation(writer, label, pred, step, name):
+    fig = plt.figure(figsize=(15, 8))
+
+    label[label==0] = 0.00001
+    label[label==1] = 0.99999
+
+    pred[pred==0] = 0.00001
+    pred[pred==1] = 0.99999
+
+    yn = label
+    xn = label
+    bce_gt = -yn*np.log(xn) - (1-yn )* np.log(1-xn)
+
+    yn = label
+    xn = pred
+    bce_true = -yn * np.log(xn) - (1 - yn) * np.log(1 - xn)
+    bce_dev =  bce_true- bce_gt
+
+
+
+    pos = [str(i) for i in range(label.shape[1])]
+
+    ax_label = fig.add_subplot(121)
+    pcm_label = ax_label.matshow(bce_gt)
+    ax_label.set_title("Min loss")
+    # ax_label.set_xticklabels([''] + pos)
+
+    ax_pred = fig.add_subplot(122)
+    pcm_pred = ax_pred.matshow(bce_dev)
+    ax_pred.set_title("Deviation from Min ")
+    # ax_pred.set_xticklabels([''] + pos)
+
+    # plt.title('Prob Distribution of Depth Label vs Prediction')
+    # cax=plt.imshow()
+    plt.colorbar(pcm_label, ax=ax_label)
+
+    plt.colorbar(pcm_pred, ax=ax_pred)
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='jpeg')
+
+    plt.clf()
+    plt.close(fig)
+    buf.seek(0)
+
+    image = PIL.Image.open(buf)
+    image = ToTensor()(image)
+
+    writer.add_image(name, image, step)
+

@@ -9,6 +9,20 @@ TINY_NUMBER = 1e-6      # float32 only has 7 decimal digits precision
 
 
 # misc utils
+def entropy_loss(p):
+    sm = torch.nn.Softmax(dim=1)
+    lsm = torch.nn.LogSoftmax(dim=1)
+
+    sm_res = sm(p)
+    lsm_res = lsm(p)
+
+    # print('[!!]P: {} LOG: {}'.format(sm_res, lsm_res))
+
+    return torch.mean(torch.sum(-1.0 * sm_res * lsm_res, dim=1))
+
+    # log_term = torch.clamp(torch.log2(p), min=-100., max=0.)
+    # return torch.mean(torch.sum(-1.0 * p * log_term, dim=1))
+
 def img2mse(x, y, mask=None):
     if mask is None:
         return torch.mean((x - y) * (x - y))
