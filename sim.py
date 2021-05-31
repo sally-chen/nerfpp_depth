@@ -20,39 +20,34 @@ import pickle
 logger = logging.getLogger(__package__)
 
 class Sim:
-    def __init__(self, args):
+    def __init__(self, args, frame_height, frame_width, max_depth):
         setup(0, args.world_size)
         self.args = args
         self.start, self.models = create_nerf(args)
+        self.h = frame_height
+        self.w = frame_width
 
     def __del__(self):
         cleanup()
 
 
-    def run(self, intrs, poses, locs, frame_height, frame_width, max_depth = 60):
+    def run(self, x, c):
 
-        ray_samplers = load_data_array(intrs, poses, locs, frame_height, frame_width, False, True)
+        ray_samplers = load_data_array([None], [x], [c],
+                                       self.h, self.w, False, True)
 
-        images = []
-        depths = []
+        time0 = time.time()
+        ret = render_single_image(self.models, ray_samplers[idx], 256)
+        dt = time.time() - time0
+        logger.info('Rendered {} in {} seconds'.format(idx, dt))
 
-        for idx in range(len(ray_samplers)):
-            time0 = time.time()
-            ret = render_single_image(self.models, ray_samplers[idx])
-            dt = time.time() - time0
-            logger.info('Rendered {} in {} seconds'.format(idx, dt))
+        im = ret[0]
 
-            # only save last level
-            im = ret['rgb']
-#            images.append(im)
+        d = ret[1]
+        d[d > max_depth] = max_depth # clip invalid points
 
-            d = ret['depth_fgbg']
-            d[d > max_depth] = max_depth  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
-#            depths.append(im)
+        return im, d
 
-            return im, d
-
-            torch.cuda.empty_cache()
 
 
 def test():
@@ -77,18 +72,38 @@ def test():
     W = 100 # width of image desired
     depth_clip = 60.  # clip depth
 
-    intrs = [torch.from_numpy(intr).to('cuda:0') for intr in intrs]
-    poses = [torch.from_numpy(pose).to('cuda:0').requires_grad_(True) for pose in poses]
-    locs = [torch.from_numpy(loc).to('cuda:0').requires_grad_(True) for loc in locs]
+    intrs = [torch.from_numpy(intr).cuda() for intr in intrs]
+    poses = [torch.from_numpy(pose).cuda().requires_grad_(True) for pose in poses]
+    locs = [torch.from_numpy(loc).cuda().requires_grad_(True) for loc in locs]
 
 
-    sim = Sim(args)
-    rgb, d = sim.run(intrs[:1], poses[:1], locs[:1], 32, 100)
-    y = d.sum()
-    y.backward()
+    sim = Sim(args, H, W, depth_clip)
+    i = 0
+
+    rgb, d = sim.run(intrs[0], poses[0], locs[0], H, W):
+    brgb = to8b(rgb.cpu().numpy())
+    bd = colorize_np(d.cpu().numpy(), cmap_name='jet', append_cbar=True)
+    bd = to8b(bd)
+    imageio.imwrite("rgb_{}.png".format(i), brgb)
+    imageio.imwrite("d_{}.png".format(i), bd)
+    A = d.sum()
+    A.backward()
     print(poses[0].grad)
+    print(locs[0].grad)
 
 
+def make_sim(config_path, channels, width, depth=60.):
+    parser = config_parser()
+    args = parser.parse_args("--config " + config_path)
+    logger.info(parser.format_values())
+
+    if args.world_size == -1:
+        args.world_size = torch.cuda.device_count()
+        logger.info('Using # gpus: {}'.format(args.world_size))
+
+    sim = Sim(args, channels, width, depth)
+
+    return sim
 
 if __name__ == '__main__':
     setup_logger()

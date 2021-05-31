@@ -129,13 +129,11 @@ def sample_pdf(bins, weights, N_samples, det=False):
 
     return samples
 
-#@torch.no_grad()
 def eval_fg_pass(ray_o, ray_d, box_loc, fg_net, N_samples, fg_far_depth, fg_query_depths, bg_depth):
     ret = fg_net(ray_o, ray_d, fg_far_depth, fg_query_depths, bg_depth, box_loc)
 
     return ret
 
-#@torch.no_grad()
 def eval_pass(ray_o, ray_d, box_loc, net, samples, fg_weights, bg_weights, fg_far_depth, fg_depth, bg_depth):
     fg_weights = fg_weights.detach()
     fg_depth_mid = .5 * (fg_depth[..., 1:] + fg_depth[..., :-1])    # [..., N_samples-1]
@@ -162,11 +160,36 @@ def eval_pass(ray_o, ray_d, box_loc, net, samples, fg_weights, bg_weights, fg_fa
 def vlinspace(a, b, steps):
     return a.view(-1, 1) + (b - a).view(-1, 1) / (steps - 1) * torch.arange(steps, device=a.device)
 
-def render_single_image(models, ray_sampler):
-    ##### parallel rendering of a single image
+
+def render_single_image(models, ray_sampler, chunk_size):
     rays = ray_sampler.get_all()
+    if chunk_size == 0:
+        return
+
+    chunks = (len(rays['ray_d']) + chunk_size - 1) // chunk_size
+    rays_split = [OrderedDict() for _ in range(chunks)]
+
+    for k, v in rays.items():
+        if torch.is_tensor(v):
+            split = torch.split(v, chunk_size)
+            for i in range(chunks):
+                rays_split[i][k] = split[i]
+
+    rgbs = []
+    depths = []
+
+    for _rays in rays_split:
+        chunk_ret = render_rays(models, _rays)
+        rgbs.append(chunk_ret['rgb'])
+        depths.append(chunk_ret['depth_fgbg'])
+
+    rgb = torch.cat(rgbs).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+    d = torch.cat(depths).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+    return rgb, d
 
 
+
+def render_rays(models, rays):
     # forward and backward
     ret_merge_chunk = [OrderedDict() for _ in range(models['cascade_level'])]
     ray_o = rays['ray_o']
@@ -175,7 +198,6 @@ def render_single_image(models, ray_sampler):
     box_loc = rays['box_loc']
 
     checknan(ray_o, ray_d, ray_d, min_depth, box_loc)
-
 
     fg_net = models['net_0']
     fg_samples = models['cascade_samples'][0]
@@ -191,15 +213,17 @@ def render_single_image(models, ray_sampler):
         [1, ] * len(dots_sh) + [fg_samples,]).expand(
                                         dots_sh + [fg_samples,]).to(ray_o.device)
 
-
     ret = eval_fg_pass(ray_o, ray_d, box_loc, fg_net, fg_samples,
-    fg_far_depth, fg_query_depths, bg_depth)
+                        fg_far_depth, fg_query_depths, bg_depth)
+
+    fg_weights = ret['fg_weights']
+    bg_weights = ret['bg_weights']
 
     del fg_near_depth
     torch.cuda.empty_cache()
 
     checknan(**ret)
-
+    ret_merge_chunk = [OrderedDict() for _ in range(models['cascade_level'])]
     for m in range(models['cascade_level']):
         if m == 0:
             continue

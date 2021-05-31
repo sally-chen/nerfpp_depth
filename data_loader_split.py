@@ -52,7 +52,7 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True):
             loc[:2] = ((loc[:2] - min ) / (max - min) - avg_pose ) * 0.5
 
 
-        ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose, box_loc=loc, lidar_image=False))
+        ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose, box_loc=loc, lidar_image=True))
 
 
 
