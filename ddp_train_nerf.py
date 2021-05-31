@@ -9,6 +9,8 @@ from collections import OrderedDict
 from ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
     NerfNetBoxOnlyWithAutoExpo, DepthOracleBig, DepthOracle
 
+from nerf_network import WrapperModule
+
 import time
 from data_loader_split import load_data_split
 import numpy as np
@@ -175,8 +177,6 @@ def render_single_image(models, ray_sampler, chunk_size,
     return rgb, d
 
 def eval_oracle(rays, net_oracle, fg_bg_net, use_zval):
-    print(rays['ray_o'].shape)
-    print(rays['fg_pts_flat'].shape)
     if fg_bg_net:
 
         if use_zval:
@@ -202,7 +202,8 @@ def eval_oracle(rays, net_oracle, fg_bg_net, use_zval):
 
 def get_depths(data, front_sample, back_sample, fg_z_vals_centre, bg_z_vals_centre, samples, train_box_only=False):
     fg_depth_mid = fg_z_vals_centre
-    fg_weights = data['likeli_fg'][:, 2:front_sample]
+    fg_weights = data['likeli_fg'][:, 2:front_sample].clone() # Avoid inplace ops
+
 
     fg_weights[fg_depth_mid[:,:-1]<0.] =0.
     fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights,
@@ -218,7 +219,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre, bg_z_vals_cent
         bg_depth_mid = bg_z_vals_centre
 
 
-        bg_weights = data['likeli_bg'][:, 1: back_sample-1]
+        bg_weights = data['likeli_bg'][:, 1: back_sample-1].clone()
         bg_weights[bg_depth_mid[:,:-1]<0.] =0.
         bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                               N_samples=samples, det=False))  # [..., N_samples]
@@ -338,8 +339,8 @@ def create_nerf(args, device='cuda:0'):
     else:
         ora_net = DepthOracleBig(args).to(device)
 
-    models['net_oracle'] = ora_net
     net = ora_net
+    models['net_oracle'] = net
     optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
     models['optim_oracle'] = optim
 
@@ -365,7 +366,7 @@ def create_nerf(args, device='cuda:0'):
                 optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(device)
 
         optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
-        models['net_{}'.format(m)] = net
+        models['net_{}'.format(m)] = WrapperModule(net)
         models['optim_{}'.format(m)] = optim
 
     start = -1

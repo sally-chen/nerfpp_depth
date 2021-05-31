@@ -1,7 +1,7 @@
 ### INPUT
 datadir = ./data/
-scene = big_inters_nom15_samp4x4_nobox
-expname = donerf_pretrain_skiprayod_fgbg_uniro_lr00005_Dfilter_netred_penc_usezval_entropy
+scene = donerf_rgb_sample32_pre
+expname = donerf_rgb_sample32_pre
 
 basedir = ./logs
 config = None

@@ -31,6 +31,7 @@ class Sim:
         cleanup()
 
 
+    @torch.no_grad()
     def run(self, i, x, c, max_depth=60):
 
         ray_samplers = load_data_array([i], [x], [c],
@@ -68,8 +69,8 @@ def test():
     [poses, intrs, locs] = pickle.load(
         open('./data/inf_test/test/sample_arrs', 'rb'))
 
-    H = 32 # high of image desired
-    W = 100 # width of image desired
+    H = 320 # high of image desired
+    W = 640 # width of image desired
     depth_clip = 60.  # clip depth
 
     intrs = [torch.from_numpy(intr).cuda() for intr in intrs]
@@ -81,15 +82,11 @@ def test():
     i = 0
 
     rgb, d = sim.run(intrs[0], poses[0], locs[0])
-    brgb = to8b(rgb.cpu().numpy())
-    bd = colorize_np(d.cpu().numpy(), cmap_name='jet', append_cbar=True)
+    brgb = to8b(rgb.detach().cpu().numpy())
+    bd = colorize_np(d.detach().cpu().numpy(), cmap_name='jet', append_cbar=True)
     bd = to8b(bd)
     imageio.imwrite("rgb_{}.png".format(i), brgb)
     imageio.imwrite("d_{}.png".format(i), bd)
-    A = d.sum()
-    A.backward()
-    print(poses[0].grad)
-    print(locs[0].grad)
 
 
 def make_sim(config_path, channels, width, depth=60.):
