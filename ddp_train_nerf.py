@@ -125,183 +125,144 @@ def sample_pdf(bins, weights, N_samples, det=False):
 
 
 
-def render_single_image(rank, world_size, models, ray_sampler, chunk_size, \
-                        train_box_only= False,have_box=False, donerf_pretrain=False, \
-                        front_sample=128, back_sample=128, fg_bg_net=True, use_zval=False):
-    ##### parallel rendering of a single image
-    def print_gpu():
-    
-        ng = torch.cuda.device_count()
-        #x = [torch.cuda.get_device_properties(i) for i in range(ng)]
-        for i in range(ng):
-            t = torch.cuda.get_device_properties(i).total_memory
-            r = torch.cuda.memory_reserved(i) 
-            a = torch.cuda.memory_allocated(i)
-            f = r-a  # free inside reserved
-            print('[mem check gpu {}] total: {} reserved: {} allocated: {} free: {}'.format(i,t,r,a,f))
-    
-    #print_gpu()
 
 
-    ray_batch = ray_sampler.get_all_classifier(front_sample, back_sample, pretrain=donerf_pretrain)
-    # ray_batch = ray_sampler.get_all()
+def render_single_image(models, ray_sampler, chunk_size,
+                        train_box_only=False, have_box=False,
+                        donerf_pretrain=False, front_sample=128, back_sample=128,
+                        fg_bg_net=True, use_zval=True):
+    """
+    Render an image using the NERF.
+    :param models: Dictionary of networks used for the render.
+    :param ray_sampler: A sampler for the image.
+    :param chunk_size: How many rays per single pass.
+    :param train_box_only: Only trains the foreground.
+    :param have_box: If there exists a box in the rays dictionary.
+    :param donerf_pretrain: ??
+    :param front_sample: Foreground samples.
+    :param back_sample: Background samples.
+    :param fg_bg_net: ??
+    :param use_zval: ??
+
+    :return: Result dictionary from the last model in the chain of models.
+    """
+
+    rays = ray_sampler.get_all_classifier(front_sample,
+                                          back_sample,
+                                          pretrain=donerf_pretrain)
+
+    chunks = (len(rays['ray_d']) + chunk_size - 1) // chunk_size
+    rays_split = [OrderedDict() for _ in range(chunks)]
+
+    for k, v in rays.items():
+        if torch.is_tensor(v):
+            split = torch.split(v, chunk_size)
+            for i in range(chunks):
+                rays_split[i][k] = split[i]
+
+    rgbs = []
+    depths = []
+
+    for _rays in rays_split:
+        chunk_ret = render_rays(models, _rays, train_box_only, have_box,
+                                donerf_pretrain, front_sample, back_sample,
+                                fg_bg_net, use_zval)
+        rgbs.append(chunk_ret['rgb'])
+        depths.append(chunk_ret['depth_fgbg'])
+
+    rgb = torch.cat(rgbs).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+    d = torch.cat(depths).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+    return rgb, d
+
+def eval_oracle(rays, net_oracle, fg_bg_net, use_zval):
+    print(rays['ray_o'].shape)
+    print(rays['fg_pts_flat'].shape)
+    if fg_bg_net:
+
+        if use_zval:
+
+            ret = net_oracle(rays['ray_o'], rays['ray_d'],
+                     rays['fg_z_vals_centre'], rays['bg_z_vals_centre'],
+                     rays['fg_far_depth'])
+        else:
+            ret = net_oracle(rays['ray_o'], rays['ray_d'],
+                         rays['fg_pts_flat'], rays['bg_pts_flat'],
+                         rays['fg_far_depth'])
+    else:
+        if use_zval:
+            pts = torch.cat([rays['fg_z_vals_centre'], rays['bg_z_vals_centre']], dim=-1)
+        else:
+            pts = torch.cat([rays['fg_pts_flat'], rays['bg_pts_flat']], dim=-1)
+        ret = net_oracle(rays['ray_o'], rays['ray_d'], pts)
 
 
+        ret['likeli_fg'] = ret['likeli'][:, :front_sample]
+        ret['likeli_bg'] = ret['likeli'][:, front_sample:]
+    return ret
+
+def get_depths(data, front_sample, back_sample, fg_z_vals_centre, bg_z_vals_centre, samples, train_box_only=False):
+    fg_depth_mid = fg_z_vals_centre
+    fg_weights = data['likeli_fg'][:, 2:front_sample]
+
+    fg_weights[fg_depth_mid[:,:-1]<0.] =0.
+    fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights,
+                          N_samples=samples, det=False))  # [..., N_samples]
+    fg_depth[fg_depth<0.] = 0.
+
+    if not train_box_only:
+        # sample pdf and concat with earlier samples
+        # bg_weights = ret['bg_weights'].clone().detach()
+        # bg_depth_mid = .5 * (bg_depth[..., 1:] + bg_depth[..., :-1])
+        # bg_weights = bg_weights[..., 1:-1]                              # [..., N_samples-2]
+
+        bg_depth_mid = bg_z_vals_centre
 
 
+        bg_weights = data['likeli_bg'][:, 1: back_sample-1]
+        bg_weights[bg_depth_mid[:,:-1]<0.] =0.
+        bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
+                              N_samples=samples, det=False))  # [..., N_samples]
+        bg_depth[bg_depth<0.] = 0.
+
+    return fg_depth, bg_depth
 
 
-
-    #print_gpu()
-    # split into ranks; make sure different processes don't overlap
-    rank_split_sizes = [ray_batch['ray_d'].shape[0] // world_size, ] * world_size
-    rank_split_sizes[-1] = ray_batch['ray_d'].shape[0] - sum(rank_split_sizes[:-1])
-    for key in ray_batch:
-        if torch.is_tensor(ray_batch[key]):
-            ray_batch[key] = torch.split(ray_batch[key], rank_split_sizes)[rank].to(rank)
-
-    # split into chunks and render inside each process
-    ray_batch_split = OrderedDict()
-    for key in ray_batch:
-        if torch.is_tensor(ray_batch[key]):
-            ray_batch_split[key] = torch.split(ray_batch[key], chunk_size)
+def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
+                front_sample, back_sample, fg_bg_net, use_zval):
+    """Render a set of rays using specific config."""
 
     # forward and backward
     ret_merge_chunk = [OrderedDict() for _ in range(models['cascade_level'])]
-    for s in range(len(ray_batch_split['ray_d'])):
-        net_oracle = models['net_oracle']
+    ray_o = rays['ray_o']
+    ray_d = rays['ray_d']
+    min_depth = rays['min_depth']
+    box_loc = rays['box_loc'] if have_box else None
+    fg_z_vals_centre = rays['fg_z_vals_centre']
+    bg_z_vals_centre = rays['bg_z_vals_centre']
+    fg_far_depth = rays['fg_far_depth']
+    fg_pts_flat = rays['fg_pts_flat']
+    bg_pts_flat = rays['bg_pts_flat']
 
+    net_oracle = models['net_oracle']
 
-        with torch.no_grad():
+    ret = eval_oracle(rays, net_oracle, fg_bg_net, use_zval)
 
-            if fg_bg_net:
+    if not donerf_pretrain:
+        for m in range(models['cascade_level']):
+            net = models['net_{}'.format(m)]
+            samples = models['cascade_samples'][m]
+            fg_depth, bg_depth = get_depths(ret, front_sample, back_sample,
+                                            fg_z_vals_centre, bg_z_vals_centre,
+                                            samples, train_box_only)
 
-                if use_zval:
-
-                    ret = net_oracle(ray_batch_split['ray_o'][s].float(), ray_batch_split['ray_d'][s].float(),
-                                 ray_batch_split['fg_z_vals_centre'][s].float(), ray_batch_split['bg_z_vals_centre'][s].float(),ray_batch_split['fg_far_depth'][s].float())
-                else:
-                    ret = net_oracle(ray_batch_split['ray_o'][s].float(), ray_batch_split['ray_d'][s].float(),
-                                 ray_batch_split['fg_pts_flat'][s].float(), ray_batch_split['bg_pts_flat'][s].float(),
-                                 ray_batch_split['fg_far_depth'][s].float())
-
+            if not have_box:
+                ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
+            elif not train_box_only:
+                ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc)
             else:
+                ret = net(ray_o, ray_d, fg_far_depth, fg_depth)
 
-                if use_zval:
-
-                    pts = torch.cat([ray_batch_split['fg_z_vals_centre'][s], ray_batch_split['bg_z_vals_centre'][s]], dim=-1)
-                else:
-                    pts = torch.cat([ray_batch_split['fg_pts_flat'][s], ray_batch_split['bg_pts_flat'][s]], dim=-1)
-                ret = net_oracle(ray_batch_split['ray_o'][s].float(), ray_batch_split['ray_d'][s].float(), pts.float())
-
-
-                ret['likeli_fg'] = ret['likeli'][:, :front_sample]
-                ret['likeli_bg'] = ret['likeli'][:, front_sample:]
-
-        if not donerf_pretrain:
-
-            ray_o = ray_batch_split['ray_o'][s]
-            ray_d = ray_batch_split['ray_d'][s]
-            min_depth = ray_batch_split['min_depth'][s]
-            if have_box:
-                box_loc = ray_batch_split['box_loc'][s]
-
-            dots_sh = list(ray_d.shape[:-1])
-            for m in range(models['cascade_level']):
-                net = models['net_{}'.format(m)]
-                # sample depths
-                N_samples = models['cascade_samples'][m]
-
-
-
-
-                fg_depth_mid = ray_batch_split['fg_z_vals_centre'][s]
-
-                # fg_depth_mid = torch.cat([torch.zeros_like(fg_depth_mid[..., 0:1]), fg_depth_mid], dim=-1)
-
-                fg_weights = ret['likeli_fg'][:, 2:front_sample]
-                fg_weights[fg_depth_mid[:,:-1]<0.] =0.
-                fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights,
-                                      N_samples=N_samples, det=False))  # [..., N_samples]
-                fg_depth[fg_depth<0.] = 0.
-
-                if not train_box_only:
-                    # sample pdf and concat with earlier samples
-                    # bg_weights = ret['bg_weights'].clone().detach()
-                    # bg_depth_mid = .5 * (bg_depth[..., 1:] + bg_depth[..., :-1])
-                    # bg_weights = bg_weights[..., 1:-1]                              # [..., N_samples-2]
-
-                    bg_depth_mid = ray_batch_split['bg_z_vals_centre'][s]
-
-
-                    bg_weights = ret['likeli_bg'][:, 1: back_sample-1]
-                    bg_weights[bg_depth_mid[:,:-1]<0.] =0.
-                    bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
-                                          N_samples=N_samples, det=False))  # [..., N_samples]
-                    bg_depth[bg_depth<0.] = 0.
-
-                    # delete unused memory
-                    del fg_weights
-                    del fg_depth_mid
-
-
-                    if not train_box_only:
-                        del bg_weights
-                        del bg_depth_mid
-
-                    torch.cuda.empty_cache()
-
-
-                #print_gpu()
-                with torch.no_grad():
-                    if not have_box:
-                        ret = net(ray_o, ray_d, ray_batch_split['fg_far_depth'][s], fg_depth, bg_depth)
-                    elif not train_box_only:
-                        ret = net(ray_o, ray_d, ray_batch_split['fg_far_depth'][s], fg_depth, bg_depth, box_loc)
-                    else:
-                        ret = net(ray_o, ray_d, ray_batch_split['fg_far_depth'][s], fg_depth)
-        for key in ret:
-            if key not in ['fg_weights', 'bg_weights']:
-                if torch.is_tensor(ret[key]):
-                    if key not in ret_merge_chunk[0]:
-                        ret_merge_chunk[0][key] = [ret[key].cpu(), ]
-                    else:
-                        ret_merge_chunk[0][key].append(ret[key].cpu())
-
-                    ret[key] = None
-
-            # clean unused memory
-            torch.cuda.empty_cache()
-
-    # merge results from different chunks
-    for m in range(len(ret_merge_chunk)):
-        for key in ret_merge_chunk[m]:
-            ret_merge_chunk[m][key] = torch.cat(ret_merge_chunk[m][key], dim=0)
-
-    # merge results from different processes
-    if rank == 0:
-        ret_merge_rank = [OrderedDict() for _ in range(len(ret_merge_chunk))]
-        for m in range(len(ret_merge_chunk)):
-            for key in ret_merge_chunk[m]:
-                # generate tensors to store results from other processes
-                sh = list(ret_merge_chunk[m][key].shape[1:])
-                ret_merge_rank[m][key] = [torch.zeros(*[size,]+sh, dtype=torch.float32) for size in rank_split_sizes]
-
-
-                torch.distributed.gather(ret_merge_chunk[m][key], ret_merge_rank[m][key])
-                ret_merge_rank[m][key] = torch.cat(ret_merge_rank[m][key], dim=0).reshape(
-                                            (ray_sampler.H, ray_sampler.W, -1)).squeeze()
-                # print(m, key, ret_merge_rank[m][key].shape)
-    else:  # send results to main process
-        for m in range(len(ret_merge_chunk)):
-            for key in ret_merge_chunk[m]:
-                torch.distributed.gather(ret_merge_chunk[m][key])
-
-    # only rank 0 program returns
-    if rank == 0:
-        return ret_merge_rank, ray_batch['cls_label']
-    else:
-        return None
+    return ret
 
 
 def log_view_to_tb(writer, global_step, log_data, gt_img, mask, gt_depth=None, train_box_only= False, have_box=False, prefix=''):
@@ -335,7 +296,7 @@ def log_view_to_tb(writer, global_step, log_data, gt_img, mask, gt_depth=None, t
         rgb_im = img_HWC2CHW(log_data[m]['fg_rgb'])
         rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
         writer.add_image(prefix + 'level_{}/fg_rgb'.format(m), rgb_im, global_step)
-        
+
         # depth = log_data[m]['fg_depth']
         # depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True,
         #                                  mask=mask))
@@ -369,29 +330,23 @@ def cleanup():
     torch.distributed.destroy_process_group()
 
 
-def create_nerf(rank, args):
-    ###### create network and wrap in ddp; each process should do this
-    # fix random seed just to make sure the network is initialized with same weights at different processes
-    torch.manual_seed(777)
-    # very important!!! otherwise it might introduce extra memory in rank=0 gpu
-    torch.cuda.set_device(rank)
-
-
-
+def create_nerf(args, device='cuda:0'):
     models = OrderedDict()
 
     if args.fg_bg_net:
-        ora_net = DepthOracle(args).to(rank)
+        ora_net = DepthOracle(args).to(device)
     else:
-        ora_net = DepthOracleBig(args).to(rank)
+        ora_net = DepthOracleBig(args).to(device)
+
     models['net_oracle'] = ora_net
-    net = DDP(ora_net, device_ids=[rank], output_device=rank, find_unused_parameters=True)
+    net = ora_net
     optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
     models['optim_oracle'] = optim
 
-    # if args.donerf_pretrain == False:
     models['cascade_level'] = args.cascade_level
-    models['cascade_samples'] = [int(x.strip()) for x in args.cascade_samples.split(',')]
+    models['cascade_samples'] = [int(x.strip())
+                                    for x in args.cascade_samples.split(',')]
+
     for m in range(models['cascade_level']):
         img_names = None
         if args.optim_autoexpo:
@@ -400,14 +355,15 @@ def create_nerf(rank, args):
             with open(f) as file:
                 img_names = json.load(file)
         if args.train_box_only:
-            net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+            net = NerfNetBoxOnlyWithAutoExpo(args,
+                optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(device)
         elif args.have_box:
-            net = NerfNetBoxWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
-            # net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+            net = NerfNetBoxWithAutoExpo(args,
+                optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(device)
         else:
-            net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
-        net = DDP(net, device_ids=[rank], output_device=rank, find_unused_parameters=True)
-        # net = DDP(net, device_ids=[rank], output_device=rank)
+            net = NerfNetWithAutoExpo(args,
+                optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(device)
+
         optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
         models['net_{}'.format(m)] = net
         models['optim_{}'.format(m)] = optim
@@ -418,8 +374,9 @@ def create_nerf(rank, args):
     if (args.ckpt_path is not None) and (os.path.isfile(args.ckpt_path)):
         ckpts = [args.ckpt_path]
     else:
+        files = sorted(os.listdir(os.path.join(args.basedir, args.expname)))
         ckpts = [os.path.join(args.basedir, args.expname, f)
-                 for f in sorted(os.listdir(os.path.join(args.basedir, args.expname))) if f.endswith('.pth')]
+                                        for f in files if f.endswith('.pth')]
 
     def path2iter(path):
         tmp = os.path.basename(path)[:-4]
@@ -429,68 +386,22 @@ def create_nerf(rank, args):
     ckpts = sorted(ckpts, key=path2iter)
     logger.info('Found ckpts: {}'.format(ckpts))
     if len(ckpts) > 0 and not args.no_reload:
-
-
         fpath = ckpts[-1]
         logger.info('Reloading from: {}'.format(fpath))
         start = path2iter(fpath)
-        # configure map_location properly for different processes
-        map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
-        to_load = torch.load(fpath, map_location=map_location)
+        to_load = torch.load(fpath, map_location='cpu')
 
         models['optim_oracle'].load_state_dict(to_load['optim_oracle'])
         models['net_oracle'].load_state_dict(to_load['net_oracle'])
-        
 
-
-        ###########################33 before donerf use random weights for nerf ##########    
+        # Before initializing donerf: use random weights for nerf.(?)
         for m in range(models['cascade_level']):
-            for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-                models[name].load_state_dict(to_load[name])
-        ####################################################################################333
-         #### tmp for reloading pretrained model
-        #fpath_sc = "./logs/pretrained/scene/model_425000.pth"
-        #to_load_sc = torch.load(fpath_sc, map_location=map_location)
-        #for m in range(models['cascade_level']):
-            # for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-        #   for name in ['net_{}'.format(m)]:
-
-        #       for k in to_load_sc[name].keys():
-         #           to_load[name][k] = to_load_sc[name][k]
-
-          #      models[name].load_state_dict(to_load[name])
-
-
-    elif args.have_box:
-
-        map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
-        # fpath_box = '/home/sally/nerf/nerfplusplus/logs/box_300_2-1_fullview_sc0.5_mx100-140/model_485000.pth'
-        # fpath_sc = '/home/sally/nerf/nerfplusplus/logs/newinter_10x10x18_npp/model_770000.pth'
-
-        ############## small inters only #############333
-        #fpath_box = '/home/sally/nerfpp/box_models/box_model_485000.pth'
-        #fpath_sc = '/home/sally/nerfpp/box_models/bg_model_770000.pth'
-        ############## small inters only #############333
-
-        ############### big inters #############
-        fpath_box = '/home/sally/nerfpp/box_models/box_model_485000.pth'
-        fpath_sc = '/home/sally/nerfpp_depth/logs/big_inters_norm15_sceneonly/model_425000.pth'
-        ############### big inters #############
-
-
-        to_load_box = torch.load(fpath_box, map_location=map_location)
-        to_load_sc = torch.load(fpath_sc, map_location=map_location)
-
-        for m in range(models['cascade_level']):
-            # for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-            for name in ['net_{}'.format(m)]:
-                for k in to_load_box[name].keys():
-                    to_load_sc[name][k] = to_load_box[name][k]
-
-                # models[name].load_state_dict(to_load_box[name])
-                models[name].load_state_dict(to_load_sc[name])
-
-
+            optim_name = 'optim_{}'.format(m)
+            net_name = 'net_{}'.format(m)
+            models[optim_name].load_state_dict(to_load[optim_name])
+            models[net_name].load_state_dict(to_load[net_name])
+            #for param in models[net_name].parameters():
+            #   param.requires_grad_(False)
 
     return start, models
 
@@ -550,7 +461,7 @@ def ddp_train_nerf(rank, args):
     ##### only main process should do the logging
     if rank == 0:
         writer = SummaryWriter(os.path.join(args.basedir, 'summaries', args.expname))
-        
+
     # start training
     what_val_to_log = 0             # helper variable for parallel rendering of a image
     what_train_to_log = 0
@@ -732,7 +643,7 @@ def ddp_train_nerf(rank, args):
                 # fg_depth_mid = torch.cat([torch.zeros_like(fg_depth_mid[..., 0:1]), fg_depth_mid], dim=-1)
 
                 fg_weights = ret['likeli_fg'][:, 2:args.front_sample].clone().detach()
-                
+
                 fg_weights[fg_depth_mid[:,:-1]<0.] = 0.
 
                 fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights,
@@ -748,12 +659,12 @@ def ddp_train_nerf(rank, args):
 
                     bg_depth_mid = ray_batch['bg_z_vals_centre']
                     bg_weights = ret['likeli_bg'][:, 1: args.back_sample-1].clone().detach()
-                    
+
                     bg_weights[bg_depth_mid[:,:-1]<0.] =0.
 
                     bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                                                   N_samples=N_samples, det=False))    # [..., N_samples]
-                    
+
                     bg_depth[bg_depth<0.] = 0.
 
 
