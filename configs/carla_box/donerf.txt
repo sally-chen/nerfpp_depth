@@ -40,7 +40,7 @@ i_weights = 5000
 have_box = False
 train_box_only = False
 depth_training = False
-donerf_pretrain = True
+donerf_pretrain = False
 
 front_sample = 128
 back_sample = 128

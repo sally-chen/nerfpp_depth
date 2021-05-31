@@ -59,9 +59,9 @@ def get_rays_scan(H, W, c2w):
     theta = np.linspace(-np.pi/4, np.pi/4, H,).astype(dtype=np.float32)
 
     pv, tv = np.meshgrid(phi, theta)
-    x = np.cos(pv) * np.cos(tv)
-    y = np.cos(pv) * np.sin(tv)
-    z = np.sin(pv)
+    x = np.sin(pv) * np.cos(tv)
+    y = np.sin(tv)
+    z = np.cos(pv) * np.cos(tv)
 
     rays_d = torch.from_numpy(np.stack([x, y, z]).reshape(3, -1)).to(c2w.device)
     rays_d = c2w[:3, :3].matmul(rays_d).T
@@ -77,17 +77,17 @@ def get_rays_scan(H, W, c2w):
 
 class RaySamplerSingleImage(object):
     def __init__(self, H, W, intrinsics=None, c2w=None,
-                       img_path=None,
-                       resolution_level=1,
-                       mask_path=None,
-                       min_depth_path=None,
-                       max_depth=None,
-                       box_loc=None,
-                       depth_path=None,
-                        rays = None,
-                        make_class_label=None,
-
-                        ):
+            img_path=None,
+            resolution_level=1,
+            mask_path=None,
+            min_depth_path=None,
+            max_depth=None,
+            box_loc=None,
+            depth_path=None,
+            rays = None,
+            make_class_label=None,
+            lidar_scan=False
+            ):
         super().__init__()
 
 
@@ -104,6 +104,7 @@ class RaySamplerSingleImage(object):
         self.max_depth = max_depth
 
         self.resolution_level = -1
+        self.lidar_scan = lidar_scan
         self.set_resolution_level(resolution_level, rays=rays)
 
 
@@ -185,15 +186,20 @@ class RaySamplerSingleImage(object):
 
 
             if rays is not None:
-                self.rays_o, self.rays_d, self.depth = rays[0].cpu().detach().numpy(), \
-                                                       rays[1].cpu().detach().numpy(), \
-                                                       rays[2].cpu().detach().numpy()
-            else:
-                self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
-                                                                         self.intrinsics, self.c2w_mat)
+                self.rays_o, self.rays_d, self.depth = (rays[0].cpu().detach().numpy(),
+                                                       rays[1].cpu().detach().numpy(),
+                                                       rays[2].cpu().detach().numpy())
+            elif self.lidar_scan:
+
+                self.rays_o, self.rays_d, self.depth = get_rays_scan(self.H, self.W,
+                        self.c2w_mat)
 
                 self.depth_sphere = intersect_sphere(self.rays_o, self.rays_d)
+            else:
+                self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
+                        self.intrinsics, self.c2w_mat)
 
+                self.depth_sphere = intersect_sphere(self.rays_o, self.rays_d)
 
 
 
@@ -264,12 +270,12 @@ class RaySamplerSingleImage(object):
         if self.min_depth is not None:
             min_depth = self.min_depth
         else:
-            min_depth = 1e-4 * np.ones_like(self.rays_d[..., 0])
+            min_depth = 1e-4 * torch.ones_like(self.rays_d[..., 0])
 
         if self.box_loc is None:
             box_loc = None
         else:
-            box_loc = np.tile(self.box_loc, (self.rays_d.shape[0],1))
+            box_loc = self.box_loc.expand(self.rays_d.shape[0], -1)
 
         ret = OrderedDict([
             ('ray_o', self.rays_o),
@@ -280,7 +286,7 @@ class RaySamplerSingleImage(object):
             ('mask', self.mask),
             ('min_depth', min_depth),
             ('box_loc', box_loc)
-        ])
+            ])
         # return torch tensors
         for k in ret:
             if ret[k] is not None:
@@ -291,7 +297,7 @@ class RaySamplerSingleImage(object):
     def get_all_classifier(self, N_front_sample, N_back_sample, pretrain, center_crop=False, ):
 
         axis_filtered_depth_flat, fg_pts_flat, bg_pts_flat, bg_z_vals_centre, fg_z_vals_centre = \
-            self.get_classifier_label_torch(N_front_sample, N_back_sample, pretrain=pretrain)
+                self.get_classifier_label_torch(N_front_sample, N_back_sample, pretrain=pretrain)
 
         if pretrain:
             cls_label_filtered = axis_filtered_depth_flat
@@ -325,7 +331,7 @@ class RaySamplerSingleImage(object):
             ('img_name', self.img_path),
             ('box_loc', box_loc)
 
-        ])
+            ])
         # return torch tensors
         for k in ret:
 
@@ -350,16 +356,16 @@ class RaySamplerSingleImage(object):
         else:
             fg_near_depth = min_depth  # [H*W,]
         step = (fg_far_depth - fg_near_depth) / (
-                    N_front_sample - 1)  # fg step size  --> will make this constant eventually [H*W]
+                N_front_sample - 1)  # fg step size  --> will make this constant eventually [H*W]
 
         fg_z_vals = np.stack([fg_near_depth + i * step for i in range(N_front_sample)],
-                             axis=-1)  # [..., N_samples] distance to camera till unit sphere , depth value
+                axis=-1)  # [..., N_samples] distance to camera till unit sphere , depth value
 
         fg_z_vals_centre = step[..., None] / 2. + fg_z_vals
 
         # slice till last sample as wel are taking the mid points
         fg_pts = self.rays_o[..., None, :] + fg_z_vals_centre[:, :-1][..., None] * self.rays_d[..., None,
-                                                                                   :]  # [H*W, N_samples, 3]
+                :]  # [H*W, N_samples, 3]
 
         bg_z_val = np.linspace(0., 1., N_back_sample)
         step = bg_z_val[1] - bg_z_val[0]
@@ -370,9 +376,9 @@ class RaySamplerSingleImage(object):
         bg_z_vals_centre = np.tile(bg_z_vals_centre, (N_rays, 1))  # [H*W, N_samples]
 
         _, bg_depth_real = depth2pts_outside_np(self.rays_o, self.rays_d,
-                                                bg_z_vals)  # [H*W, N_samples, 4],  # [H*W, N_samples]
+                bg_z_vals)  # [H*W, N_samples, 4],  # [H*W, N_samples]
         bg_pts, _ = depth2pts_outside_np(self.rays_o, self.rays_d,
-                                         bg_z_vals_centre)  # [H*W, N_samples, 4],  # [H*W, N_samples]
+                bg_z_vals_centre)  # [H*W, N_samples, 4],  # [H*W, N_samples]
 
         # flip left and right
         bg_pts, bg_depth_real = np.fliplr(bg_pts), np.fliplr(bg_depth_real)
@@ -438,10 +444,10 @@ class RaySamplerSingleImage(object):
 
 
         step = (fg_far_depth - fg_near_depth) / (
-                    N_front_sample - 1)  # fg step size  --> will make this constant eventually [H*W]
+                N_front_sample - 1)  # fg step size  --> will make this constant eventually [H*W]
 
         fg_z_vals = torch.stack([fg_near_depth + i * step for i in range(N_front_sample)],
-                             dim=-1)  # [..., N_samples] distance to camera till unit sphere
+                dim=-1)  # [..., N_samples] distance to camera till unit sphere
 
         fg_z_vals_centre = step.unsqueeze(-1) / 2. + fg_z_vals
         fg_z_vals_centre = fg_z_vals_centre[:, :-1]
@@ -455,19 +461,19 @@ class RaySamplerSingleImage(object):
         bg_z_vals_centre = bg_z_vals[:-1] + step / 2.
 
         bg_z_vals = bg_z_vals.view(
-            [1, ]  + [N_back_sample, ]).expand([N_rays] + [N_back_sample, ])  # [H*W, N_samples]
+                [1, ]  + [N_back_sample, ]).expand([N_rays] + [N_back_sample, ])  # [H*W, N_samples]
         bg_z_vals_centre = bg_z_vals_centre.view(
-            [1, ]  + [N_back_sample - 1, ]).expand([N_rays] + [N_back_sample - 1, ])  # [H*W, N_samples]
+                [1, ]  + [N_back_sample - 1, ]).expand([N_rays] + [N_back_sample - 1, ])  # [H*W, N_samples]
 
 
 
 
         _, bg_depth_real = depth2pts_outside(
-            rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]), rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),bg_z_vals)  # [H*W, N_samples, 4],  # [H*W, N_samples]
+                rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]), rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),bg_z_vals)  # [H*W, N_samples, 4],  # [H*W, N_samples]
         bg_pts, _ = depth2pts_outside(
-            rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample-1, 3]),
-            rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample-1, 3]),
-            bg_z_vals_centre)  # [H*W, N_samples, 4],  # [H*W, N_samples]
+                rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample-1, 3]),
+                rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample-1, 3]),
+                bg_z_vals_centre)  # [H*W, N_samples, 4],  # [H*W, N_samples]
 
         # flip left and right
         bg_pts, bg_depth_real = torch.flip(bg_pts, dims=[1,]), torch.fliplr(bg_depth_real)
@@ -498,16 +504,16 @@ class RaySamplerSingleImage(object):
             ## you can technically loop through ones and compute that function
 
             target_values = np.array([[0., 0.20943058, 0.29289322, 0.20943058, 0.        ],\
-                               [0.20943058, 0.5       , 0.64644661, 0.5       , 0.20943058],\
-                               [0.29289322, 0.64644661, 1.        , 0.64644661, 0.29289322],\
-                               [0.20943058, 0.5       , 0.64644661, 0.5       , 0.20943058],\
-                               [0.        , 0.20943058, 0.29289322, 0.20943058, 0.        ]])
+                    [0.20943058, 0.5       , 0.64644661, 0.5       , 0.20943058],\
+                    [0.29289322, 0.64644661, 1.        , 0.64644661, 0.29289322],\
+                    [0.20943058, 0.5       , 0.64644661, 0.5       , 0.20943058],\
+                    [0.        , 0.20943058, 0.29289322, 0.20943058, 0.        ]])
 
             sort_ind = np.array([[5,4,3,4,5],\
-                                      [4,2,1,2,4],\
-                                      [3,1,0,1,3],\
-                                      [4,2,1,2,4],\
-                                      [5,4,3,4,5]])
+                    [4,2,1,2,4],\
+                    [3,1,0,1,3],\
+                    [4,2,1,2,4],\
+                    [5,4,3,4,5]])
             ind_list = []
 
             for i in range(-2,3):
@@ -557,7 +563,7 @@ class RaySamplerSingleImage(object):
 
             # file = open(self.label_path, 'wb+')
             # pickle.dump([cls_label_flat_filtered.detach().cpu().numpy(), points.detach().cpu().numpy(), \
-            #              bg_z_vals_centre.detach().cpu().numpy(), fg_z_vals_centre.detach().cpu().numpy()], file)
+                    #              bg_z_vals_centre.detach().cpu().numpy(), fg_z_vals_centre.detach().cpu().numpy()], file)
         else:
             cls_label_flat_filtered = None
 
@@ -572,7 +578,7 @@ class RaySamplerSingleImage(object):
 
 
         axis_filtered_depth_flat, fg_pts_flat, bg_pts_flat, bg_z_vals_centre, fg_z_vals_centre = \
-           self.get_classifier_label_torch( N_front_sample, N_back_sample, pretrain)
+                self.get_classifier_label_torch( N_front_sample, N_back_sample, pretrain)
 
         select_inds = np.random.choice(self.H * self.W, size=(N_rand,), replace=False)
 
@@ -637,7 +643,7 @@ class RaySamplerSingleImage(object):
             ('img_name', self.img_path),
             ('box_loc', box_loc)
 
-        ])
+            ])
         # return torch tensors
         for k in ret:
 
@@ -661,7 +667,7 @@ class RaySamplerSingleImage(object):
 
             # pixel coordinates
             u, v = np.meshgrid(np.arange(half_W-quad_W, half_W+quad_W),
-                               np.arange(half_H-quad_H, half_H+quad_H))
+                    np.arange(half_H-quad_H, half_H+quad_H))
             u = u.reshape(-1)
             v = v.reshape(-1)
 
@@ -711,7 +717,7 @@ class RaySamplerSingleImage(object):
             ('min_depth', min_depth),
             ('img_name', self.img_path),
             ('box_loc', box_loc)
-        ])
+            ])
         # return torch tensors
         for k in ret:
             if ret[k] is not None and isinstance(ret[k], np.ndarray):
