@@ -244,8 +244,8 @@ def make_dot(var, params=None):
     add_nodes(var)
     return dot
 
-def render_single_image_noddp(rank, world_size, models, ray_sampler, chunk_size, \
-                        train_box_only= False,have_box=False, use_ddp=True, draw=True, args=None):
+def render_single_image_noddp(models, ray_sampler, chunk_size, \
+                        train_box_only= False,have_box=False):
     ray_batch = ray_sampler.get_all()
 
     # split into chunks and render inside each process
@@ -799,8 +799,7 @@ def create_nerf(rank, args):
 
 
 def ddp_train_nerf(rank, args):
-    ###### set up multi-processing
-    setup(rank, args.world_size)
+
     ###### set up logger
     logger = logging.getLogger(__package__)
     setup_logger()
@@ -817,20 +816,17 @@ def ddp_train_nerf(rank, args):
         args.chunk_size = 4096
 
     ###### Create log dir and copy the config file
-    if rank == 0:
-        os.makedirs(os.path.join(args.basedir, args.expname), exist_ok=True)
-        f = os.path.join(args.basedir, args.expname, 'args.txt')
-        with open(f, 'w') as file:
-            for arg in (vars(args)):
-                attr = getattr(args, arg)
-                file.write('{} = {}\n'.format(arg, attr))
-        if args.config is not None:
-            f = os.path.join(args.basedir, args.expname, 'config.txt')
-            with open(f, 'w') as file:
-                file.write(open(args.config, 'r').read())
 
-    if args.use_ddp:
-        torch.distributed.barrier()
+    os.makedirs(os.path.join(args.basedir, args.expname), exist_ok=True)
+    f = os.path.join(args.basedir, args.expname, 'args.txt')
+    with open(f, 'w') as file:
+        for arg in (vars(args)):
+            attr = getattr(args, arg)
+            file.write('{} = {}\n'.format(arg, attr))
+    if args.config is not None:
+        f = os.path.join(args.basedir, args.expname, 'config.txt')
+        with open(f, 'w') as file:
+            file.write(open(args.config, 'r').read())
 
     ray_samplers = load_data_split(args.datadir, args.scene, split='train',
                                    try_load_min_depth=args.load_min_depth, have_box=args.have_box,
@@ -839,15 +835,9 @@ def ddp_train_nerf(rank, args):
                                        try_load_min_depth=args.load_min_depth, skip=args.testskip, have_box=args.have_box,
                                        train_depth=True)
 
-    # write training image names for autoexposure
-    if args.optim_autoexpo:
-        f = os.path.join(args.basedir, args.expname, 'train_images.json')
-        with open(f, 'w') as file:
-            img_names = [ray_samplers[i].img_path for i in range(len(ray_samplers))]
-            json.dump(img_names, file, indent=2)
 
     ###### create network and wrap in ddp; each process should do this
-    start, models = create_nerf(rank, args)
+    start, models = create_nerf_noddp(args)
 
     ##### important!!!
     # make sure different processes sample different rays
@@ -855,9 +845,8 @@ def ddp_train_nerf(rank, args):
     # make sure different processes have different perturbations in depth samples
     torch.manual_seed((rank + 1) * 777)
 
-    ##### only main process should do the logging
-    if rank == 0:
-        writer = SummaryWriter(os.path.join(args.basedir, 'summaries', args.expname))
+
+    writer = SummaryWriter(os.path.join(args.basedir, 'summaries', args.expname))
         
     # start training
     what_val_to_log = 0             # helper variable for parallel rendering of a image
@@ -865,17 +854,10 @@ def ddp_train_nerf(rank, args):
     for global_step in range(start+1, start+1+args.N_iters):
         time0 = time.time()
         scalars_to_log = OrderedDict()
-        ### Start of core optimization loop
-        scalars_to_log['resolution'] = ray_samplers[0].resolution_level
+
         # randomly sample rays and move to device
         i = np.random.randint(low=0, high=len(ray_samplers))
         ray_batch = ray_samplers[i].random_sample(args.N_rand, center_crop=False)
-        for key in ray_batch:
-            if torch.is_tensor(ray_batch[key]):
-                ray_batch[key] = ray_batch[key].to(rank)
-
-        # r_o_np = ray_batch['ray_o'].cpu().numpy()
-        # r_d_np = ray_batch['ray_d'].cpu().numpy()
 
         # forward and backward
         dots_sh = list(ray_batch['ray_d'].shape[:-1])  # number of rays
@@ -933,63 +915,45 @@ def ddp_train_nerf(rank, args):
             else:
                 ret = net(ray_batch['ray_o'], ray_batch['ray_d'], fg_far_depth, fg_depth,
                           img_name=ray_batch['img_name'])
-            #writer.add_graph(net, [ray_batch['ray_o'], ray_batch['ray_d'], fg_far_depth, fg_depth, bg_depth, ray_batch['box_loc']])
-            
+
             all_rets.append(ret)
 
             rgb_gt = ray_batch['rgb'].to(rank)
-            if 'autoexpo' in ret:
-                scale, shift = ret['autoexpo']
-                scalars_to_log['level_{}/autoexpo_scale'.format(m)] = scale.item()
-                scalars_to_log['level_{}/autoexpo_shift'.format(m)] = shift.item()
-                # rgb_gt = scale * rgb_gt + shift
-                rgb_pred = (ret['rgb'] - shift) / scale
-                rgb_loss = img2mse(rgb_pred, rgb_gt)
-                loss = rgb_loss + args.lambda_autoexpo * (torch.abs(scale-1.)+torch.abs(shift))
+
+            rgb_loss = img2mse(ret['rgb'], rgb_gt)
+            if args.depth_training:
+                depth_gt = ray_batch['depth_gt'].to(rank)
+                depth_pred = ret['depth_fgbg']
+                #mask =  torch.tensor(0. * np.ones(depth_pred.shape).astype(np.float32)).cuda()
+                inds = torch.where(depth_gt < 2001.)
+                d_pred_map = depth_pred[inds]
+                d_gt_map = depth_gt[inds]
+
+                #print(depth_pred)
+                #d_pred_map = torch.where(depth_pred < 1000., depth_pred, mask)
+                #print(inds.shape)
+                #print(inds)
+                #print(d_pred_map.shape, d_gt_map.shape)
+                #depth_loss = dep_l1l2loss(d_pred_map, d_gt_map, l1l2 = 'l1')
+
+
+                ################final depth reg #################333333
+
+                depth_loss = dep_l1l2loss(torch.div(1.,d_pred_map), torch.div(1.,d_gt_map), l1l2 = 'l1')
+                #reg_loss = dep_l1l2loss(torch.div(1.,d_pred_map[:512])-torch.div(1.,d_pred_map[512:]), torch.div(1.,d_gt_map[:512])-torch.div(1.,d_gt_map[512:]), l1l2 = 'l1')
+                loss = rgb_loss * 0.  +  depth_loss
+                #scalars_to_log['level_{}/reg_loss'.format(m)] = reg_loss.item()
+
+                #loss = rgb_loss * 0 +  depth_loss
+                scalars_to_log['level_{}/depth_loss'.format(m)] = depth_loss.item()
+
             else:
-                rgb_loss = img2mse(ret['rgb'], rgb_gt)
-                if args.depth_training:
-                    depth_gt = ray_batch['depth_gt'].to(rank)
-                    depth_pred = ret['depth_fgbg']
-                    #mask =  torch.tensor(0. * np.ones(depth_pred.shape).astype(np.float32)).cuda()
-                    inds = torch.where(depth_gt < 2001.)
-                    d_pred_map = depth_pred[inds]
-                    d_gt_map = depth_gt[inds]
+                loss = rgb_loss
 
-                    #print(depth_pred)
-                    #d_pred_map = torch.where(depth_pred < 1000., depth_pred, mask)
-                    #print(inds.shape)
-                    #print(inds)
-                    #print(d_pred_map.shape, d_gt_map.shape)
-                    #depth_loss = dep_l1l2loss(d_pred_map, d_gt_map, l1l2 = 'l1')
-                    
-                    
-                    ################final depth reg #################333333
-                    
-                    depth_loss = dep_l1l2loss(torch.div(1.,d_pred_map), torch.div(1.,d_gt_map), l1l2 = 'l1')
-                    #reg_loss = dep_l1l2loss(torch.div(1.,d_pred_map[:512])-torch.div(1.,d_pred_map[512:]), torch.div(1.,d_gt_map[:512])-torch.div(1.,d_gt_map[512:]), l1l2 = 'l1')
-                    loss = rgb_loss * 0.  +  depth_loss
-                    #scalars_to_log['level_{}/reg_loss'.format(m)] = reg_loss.item()
-
-                    #loss = rgb_loss * 0 +  depth_loss
-                    scalars_to_log['level_{}/depth_loss'.format(m)] = depth_loss.item()
-
-                else:
-                    loss = rgb_loss
-
-            # print(global_step)
-            #scalars_to_log['level_{}/loss'.format(m)] = rgb_loss.item()
-            #scalars_to_log['level_{}/pnsr'.format(m)] = mse2psnr(rgb_loss.item())
-            # print('before backward')
             loss.backward()
-            # print('before step')
             optim.step()
 
-            #writer.add_graph(net, [ray_batch['ray_o'], ray_batch['ray_d'], fg_far_depth, fg_depth, bg_depth, ray_batch['box_loc']])
 
-            # # clean unused memory
-            # torch.cuda.empty_cache()
-        
 
         ### end of core optimization loop
         dt = time.time() - time0
@@ -1008,30 +972,30 @@ def ddp_train_nerf(rank, args):
             #### critical: make sure each process is working on the same random image
             time0 = time.time()
             idx = what_val_to_log % len(val_ray_samplers)
-            log_data = render_single_image(rank, args.world_size, models, val_ray_samplers[idx], args.chunk_size, args.train_box_only, have_box=args.have_box)
+            log_data = render_single_image_noddp(models, val_ray_samplers[idx], args.chunk_size, args.train_box_only, have_box=args.have_box)
 
             what_val_to_log += 1
             dt = time.time() - time0
-            if rank == 0:    # only main process should do this
-                logger.info('Logged a random validation view in {} seconds'.format(dt))
-                #if args.depth_training:
-                log_view_to_tb(writer, global_step, log_data, gt_depth=val_ray_samplers[idx].get_depth(), gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
-                #else:
+
+            logger.info('Logged a random validation view in {} seconds'.format(dt))
+            #if args.depth_training:
+            log_view_to_tb(writer, global_step, log_data, gt_depth=val_ray_samplers[idx].get_depth(), gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
+            #else:
                  #   log_view_to_tb(writer, global_step, log_data, gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
-                            
+
             time0 = time.time()
             idx = what_train_to_log % len(ray_samplers)
-            log_data = render_single_image(rank, args.world_size, models, ray_samplers[idx], args.chunk_size, args.train_box_only, have_box=args.have_box)
+            log_data = render_single_image_noddp(models, ray_samplers[idx], args.chunk_size, args.train_box_only, have_box=args.have_box)
             what_train_to_log += 1
             dt = time.time() - time0
-            if rank == 0:   # only main process should do this
-                logger.info('Logged a random training view in {} seconds'.format(dt))
-                log_view_to_tb(writer, global_step, log_data, gt_img=ray_samplers[idx].get_img(), gt_depth=ray_samplers[idx].get_depth(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='train/')
+
+            logger.info('Logged a random training view in {} seconds'.format(dt))
+            log_view_to_tb(writer, global_step, log_data, gt_img=ray_samplers[idx].get_img(), gt_depth=ray_samplers[idx].get_depth(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='train/')
 
             del log_data
             torch.cuda.empty_cache()
 
-        if rank == 0 and (global_step % args.i_weights == 0 and global_step > 0):
+        if (global_step % args.i_weights == 0 and global_step > 0):
             # saving checkpoints and logging
             fpath = os.path.join(args.basedir, args.expname, 'model_{:06d}.pth'.format(global_step))
             to_save = OrderedDict()

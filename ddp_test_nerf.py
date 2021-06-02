@@ -59,8 +59,8 @@ def ddp_test_nerf_noddp(rank, args):
                 continue
 
             time0 = time.time()
-            ret = render_single_image_noddp(rank, args.world_size, models, ray_samplers[idx], args.chunk_size, \
-                                      train_box_only=False, have_box=True, use_ddp=args.use_ddp, args=args)
+            ret = render_single_image_noddp(models, ray_samplers[idx], args.chunk_size, \
+                                      train_box_only=False, have_box=True)
 
             dt = time.time() - time0
             if rank == 0:  # only main process should do this

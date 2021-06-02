@@ -1,0 +1,43 @@
+### INPUT
+datadir = ./data/
+scene = big_inters_nom15_samp4x4
+expname = big_inters_norm15_comb_correct
+
+basedir = ./logs
+config = None
+ckpt_path = None
+no_reload = False
+testskip = 1
+
+### TRAINING
+N_iters = 1000001
+N_rand = 4096
+lrate = 0.0005
+lrate_decay_factor = 0.1
+lrate_decay_steps = 50000000
+
+### CASCADE
+cascade_level = 2
+cascade_samples = 64,128
+
+### TESTING
+chunk_size = 8192
+
+### RENDERING
+det = False
+max_freq_log2 = 10 # 10
+max_freq_log2_viewdirs = 4 # 4
+netdepth = 8
+netwidth = 256
+use_viewdirs = True
+
+### CONSOLE AND TENSORBOARD
+i_img = 2000
+i_print = 100
+i_weights = 5000
+
+
+have_box = True
+train_box_only = False
+depth_training = False
+
