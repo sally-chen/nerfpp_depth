@@ -1,9 +1,9 @@
 ### INPUT
-datadir = ./data/
+datadir = /home/sally/nerf_clone/nerfpp_depth/data/
 scene = big_inters_nom15_samp4x4
 expname = big_inters_norm15_comb_correct
 
-basedir = ./logs
+basedir =  /home/sally/nerf_clone/nerfpp_depth/logs
 config = None
 ckpt_path = None
 no_reload = False
@@ -12,7 +12,7 @@ testskip = 1
 ### TRAINING
 N_iters = 1000001
 N_rand = 4096
-lrate = 0.0005
+lrate = 0.005
 lrate_decay_factor = 0.1
 lrate_decay_steps = 50000000
 
@@ -32,12 +32,12 @@ netwidth = 256
 use_viewdirs = True
 
 ### CONSOLE AND TENSORBOARD
-i_img = 2000
-i_print = 100
-i_weights = 5000
+i_img = 2000 # num of steps for producing validation image
+i_print = 100 # num of steps to print loss
+i_weights = 5000 # num of steps to save weight
 
 
-have_box = True
-train_box_only = False
-depth_training = False
+have_box = True # whether there is the box added to the model
+train_box_only = False # if training a box-only model
+depth_training = False #whether to train with depth, need to modify loss function if want to train both rgb and depth
 

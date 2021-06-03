@@ -14,9 +14,10 @@ from tensorboardX import SummaryWriter
 from utils import img2mse, mse2psnr, dep_l1l2loss, img_HWC2CHW, colorize, colorize_np,to8b, TINY_NUMBER
 import logging
 import json
+from nerf_network import WrapperModule
 
 from helpers import plot_ray_batch
-from graphviz import Digraph
+# from graphviz import Digraph
 from torch.autograd import Variable
 
 
@@ -623,7 +624,7 @@ def create_nerf_noddp(args):
             net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names)
 
         optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
-        models['net_{}'.format(m)] = net
+        models['net_{}'.format(m)] = WrapperModule(net)
         models['optim_{}'.format(m)] = optim
 
     start = -1
@@ -642,7 +643,7 @@ def create_nerf_noddp(args):
 
     ckpts = sorted(ckpts, key=path2iter)
 
-    ckpts = ['/home/sally/nerfpp_depth_test/logs/big_inters_norm15_comb_disp_reg/noddp_model_700000.pth']
+    # ckpts = ['/home/sally/nerfpp_depth_test/logs/big_inters_norm15_comb_disp_reg/noddp_model_700000.pth']
     logger.info('Found ckpts: {}'.format(ckpts))
     if len(ckpts) > 0 and not args.no_reload:
 
@@ -654,11 +655,11 @@ def create_nerf_noddp(args):
 
         for m in range(models['cascade_level']):
             for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-
                 models[name].load_state_dict(to_load[name])
-
-                if name in ['net_{}'.format(m)]:
+                if name.startswith('net'):
                     models[name].to(0)
+
+
 
     return start, models
 
@@ -770,8 +771,8 @@ def create_nerf(rank, args):
         ############## small inters only #############333 
         
         ############### big inters #############
-        fpath_box = '/home/sally/nerfpp/box_models/box_model_485000.pth'                                                        
-        fpath_sc = '/home/sally/nerfpp_depth/logs/big_inters_norm15_sceneonly/model_425000.pth'
+        fpath_box = './pretrained/box_models/box_model_485000.pth'
+        fpath_sc = './pretrained//big_inters_norm15_sceneonly/model_425000.pth'
         ############### big inters #############
 
 
@@ -858,6 +859,11 @@ def ddp_train_nerf(rank, args):
         # randomly sample rays and move to device
         i = np.random.randint(low=0, high=len(ray_samplers))
         ray_batch = ray_samplers[i].random_sample(args.N_rand, center_crop=False)
+        for key in ray_batch:
+            if torch.is_tensor(ray_batch[key]):
+                ray_batch[key] = ray_batch[key].to(0)
+
+
 
         # forward and backward
         dots_sh = list(ray_batch['ray_d'].shape[:-1])  # number of rays
@@ -869,10 +875,6 @@ def ddp_train_nerf(rank, args):
             # sample depths
             N_samples = models['cascade_samples'][m]
 
-
-            ## plot ## ## plot ## ## plot ## ## plot ##
-            # plot_ray_batch(ray_batch)
-            ## plot ## ## plot ## ## plot ## ## plot ##
 
             if m == 0:
                 # print(m, global_step)
@@ -924,31 +926,23 @@ def ddp_train_nerf(rank, args):
             if args.depth_training:
                 depth_gt = ray_batch['depth_gt'].to(rank)
                 depth_pred = ret['depth_fgbg']
-                #mask =  torch.tensor(0. * np.ones(depth_pred.shape).astype(np.float32)).cuda()
+
                 inds = torch.where(depth_gt < 2001.)
                 d_pred_map = depth_pred[inds]
                 d_gt_map = depth_gt[inds]
-
-                #print(depth_pred)
-                #d_pred_map = torch.where(depth_pred < 1000., depth_pred, mask)
-                #print(inds.shape)
-                #print(inds)
-                #print(d_pred_map.shape, d_gt_map.shape)
-                #depth_loss = dep_l1l2loss(d_pred_map, d_gt_map, l1l2 = 'l1')
-
-
-                ################final depth reg #################333333
 
                 depth_loss = dep_l1l2loss(torch.div(1.,d_pred_map), torch.div(1.,d_gt_map), l1l2 = 'l1')
                 #reg_loss = dep_l1l2loss(torch.div(1.,d_pred_map[:512])-torch.div(1.,d_pred_map[512:]), torch.div(1.,d_gt_map[:512])-torch.div(1.,d_gt_map[512:]), l1l2 = 'l1')
                 loss = rgb_loss * 0.  +  depth_loss
                 #scalars_to_log['level_{}/reg_loss'.format(m)] = reg_loss.item()
 
-                #loss = rgb_loss * 0 +  depth_loss
                 scalars_to_log['level_{}/depth_loss'.format(m)] = depth_loss.item()
 
             else:
                 loss = rgb_loss
+                scalars_to_log['level_{}/loss'.format(m)] = rgb_loss.item()
+                scalars_to_log['level_{}/pnsr'.format(m)] = mse2psnr(rgb_loss.item())
+
 
             loss.backward()
             optim.step()

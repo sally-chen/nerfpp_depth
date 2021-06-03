@@ -141,3 +141,11 @@ class MLPNet(nn.Module):
         ret = OrderedDict([('rgb', rgb),
                            ('sigma', sigma.squeeze(-1))])
         return ret
+
+class WrapperModule(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, *args, **kwargs):
+        return self.module.forward(*args, **kwargs)
