@@ -139,10 +139,10 @@ class NerfNet(nn.Module):
         bg_depth_map = bg_lambda * bg_depth_map
         depth_map = fg_depth_map + bg_depth_map
         
-        device = torch.cuda.device('cuda:0')
-        max = torch.tensor([100., 140.], device=torch.device('cuda:0'))
-        min = torch.tensor([85., 125.], device=torch.device('cuda:0'))
-        avg_pose = torch.tensor([0.5,  0.5], device=torch.device('cuda:0'))
+
+        max = torch.tensor([100., 140.]).to(torch.cuda.current_device())
+        min = torch.tensor([85., 125.]).to(torch.cuda.current_device())
+        avg_pose = torch.tensor([0.5,  0.5]).to(torch.cuda.current_device())
 
         depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (max-min) + min
         ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
@@ -356,11 +356,11 @@ class NerfNetBox(nn.Module):
         ## combine foregroung and background in the right depth unit s well
 
         ## need inverse normalization
-        device = torch.cuda.device('cuda:0')
 
-        max = torch.tensor([100., 140.], device=torch.device('cuda:0'))
-        min = torch.tensor([85., 125.], device=torch.device('cuda:0'))
-        avg_pose = torch.tensor([0.5,  0.5], device=torch.device('cuda:0'))
+
+        max = torch.tensor([100., 140.]).to(torch.cuda.current_device())
+        min = torch.tensor([85., 125.]).to(torch.cuda.current_device())
+        avg_pose = torch.tensor([0.5,  0.5]).to(torch.cuda.current_device())
 
         depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (max-min) + min
         ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min

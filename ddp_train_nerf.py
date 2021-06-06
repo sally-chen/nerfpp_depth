@@ -425,8 +425,6 @@ def create_nerf_noddp(args):
 
         fpath = ckpts[-1]
         logger.info('Reloading from: {}'.format(fpath))
-        # configure map_location properly for different processes
-        map_location = {'cuda:%d' % 0: 'cuda:%d' % 0}
         to_load = torch.load(fpath)
 
         for m in range(models['cascade_level']):
