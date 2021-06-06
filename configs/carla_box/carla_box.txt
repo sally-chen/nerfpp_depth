@@ -16,6 +16,8 @@ lrate = 0.005
 lrate_decay_factor = 0.1
 lrate_decay_steps = 50000000
 
+
+
 ### CASCADE
 cascade_level = 2
 cascade_samples = 64,128
