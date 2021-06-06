@@ -202,49 +202,6 @@ def sample_pdf(bins, weights, N_samples, det=False):
 
     return samples
 
-def make_dot(var, params=None):
-    if params is not None:
-        assert isinstance(params.values()[0], Variable)
-        param_map = {id(v): k for k, v in params.items()}
-
-    node_attr = dict(style='filled',
-                     shape='box',
-                     align='left',
-                     fontsize='12',
-                     ranksep='0.1',
-                     height='0.2')
-    dot = Digraph(node_attr=node_attr, graph_attr=dict(size="12,12"))
-    seen = set()
-
-    def size_to_str(size):
-        return '(' + (', ').join(['%d' % v for v in size]) + ')'
-
-    def add_nodes(var):
-        if var not in seen:
-            if torch.is_tensor(var):
-                dot.node(str(id(var)), size_to_str(var.size()), fillcolor='orange')
-                dot.edge(str(id(var.grad_fn)), str(id(var)))
-                var = var.grad_fn
-            if hasattr(var, 'variable'):
-                u = var.variable
-                name = param_map[id(u)] if params is not None else ''
-                node_name = '%s\n %s' % (name, size_to_str(u.size()))
-                dot.node(str(id(var)), node_name, fillcolor='lightblue')
-            else:
-                dot.node(str(id(var)), str(type(var).__name__))
-            seen.add(var)
-            if hasattr(var, 'next_functions'):
-                for u in var.next_functions:
-                    if u[0] is not None:
-                        dot.edge(str(id(u[0])), str(id(var)))
-                        add_nodes(u[0])
-            if hasattr(var, 'saved_tensors'):
-                for t in var.saved_tensors:
-                    dot.edge(str(id(t)), str(id(var)))
-                    add_nodes(t)
-    add_nodes(var)
-    return dot
-
 def render_single_image_noddp(models, ray_sampler, chunk_size, \
                         train_box_only= False,have_box=False):
     ray_batch = ray_sampler.get_all()
@@ -253,7 +210,7 @@ def render_single_image_noddp(models, ray_sampler, chunk_size, \
     ray_batch_split = OrderedDict()
     for key in ray_batch:
         if torch.is_tensor(ray_batch[key]):
-            ray_batch_split[key] = torch.split(ray_batch[key].to(0), chunk_size)
+            ray_batch_split[key] = torch.split(ray_batch[key].to(torch.cuda.current_device()), chunk_size)
 
     # forward and backward
     ret_merge_chunk = [OrderedDict() for _ in range(models['cascade_level'])]
@@ -283,7 +240,7 @@ def render_single_image_noddp(models, ray_sampler, chunk_size, \
                 if not train_box_only:
                     # background depth
                     bg_depth = torch.linspace(0., 1., N_samples).view(
-                        [1, ] * len(dots_sh) + [N_samples, ]).expand(dots_sh + [N_samples, ]).to(0)
+                        [1, ] * len(dots_sh) + [N_samples, ]).expand(dots_sh + [N_samples, ]).to(torch.cuda.current_device())
 
                 # delete unused memory
                 del fg_near_depth
@@ -360,187 +317,6 @@ def render_single_image_noddp(models, ray_sampler, chunk_size, \
 
     # only rank 0 program returns
     return ret_merge_chunk
-
-def render_single_image(rank, world_size, models, ray_sampler, chunk_size, \
-                        train_box_only= False,have_box=False, use_ddp=True, draw=True, args=None):
-    ##### parallel rendering of a single image
-    def print_gpu():
-    
-        ng = torch.cuda.device_count()
-        #x = [torch.cuda.get_device_properties(i) for i in range(ng)]
-        for i in range(ng):
-            t = torch.cuda.get_device_properties(i).total_memory
-            r = torch.cuda.memory_reserved(i) 
-            a = torch.cuda.memory_allocated(i)
-            f = r-a  # free inside reserved
-            print('[mem check gpu {}] total: {} reserved: {} allocated: {} free: {}'.format(i,t,r,a,f))
-    
-    #print_gpu() 
-    ray_batch = ray_sampler.get_all()
-
-    # writer = SummaryWriter(os.path.join(args.basedir, 'summaries', args.expname))
-    #
-    #
-    #
-    #
-        
-        
-        
-        
-    #print_gpu()   
-    # split into ranks; make sure different processes don't overlap
-    rank_split_sizes = [ray_batch['ray_d'].shape[0] // world_size, ] * world_size
-    rank_split_sizes[-1] = ray_batch['ray_d'].shape[0] - sum(rank_split_sizes[:-1])
-    for key in ray_batch:
-        if torch.is_tensor(ray_batch[key]):
-            ray_batch[key] = torch.split(ray_batch[key], rank_split_sizes)[rank].to(rank)
-
-    # split into chunks and render inside each process
-    ray_batch_split = OrderedDict()
-    for key in ray_batch:
-        if torch.is_tensor(ray_batch[key]):
-            ray_batch_split[key] = torch.split(ray_batch[key], chunk_size)
-
-    # forward and backward
-    ret_merge_chunk = [OrderedDict() for _ in range(models['cascade_level'])]
-    for s in range(len(ray_batch_split['ray_d'])):
-        ray_o = ray_batch_split['ray_o'][s]
-        ray_d = ray_batch_split['ray_d'][s]
-        min_depth = ray_batch_split['min_depth'][s]
-        if have_box:
-            box_loc = ray_batch_split['box_loc'][s]
-
-        dots_sh = list(ray_d.shape[:-1])
-
-        ## temp
-        # models['cascade_level'] = 1
-        for m in range(models['cascade_level']):
-
-            net = models['net_{}'.format(m)]
-
-            print(net)
-            # sample depths
-            N_samples = models['cascade_samples'][m]
-            if m == 0:
-                # foreground depth
-                fg_far_depth = intersect_sphere(ray_o, ray_d)  # [...,]
-                fg_near_depth = min_depth  # [..., ]
-                step = (fg_far_depth - fg_near_depth) / (N_samples - 1)
-                fg_depth = torch.stack([fg_near_depth + i * step for i in range(N_samples)], dim=-1)  # [..., N_samples]
-
-                if not train_box_only:
-
-                    # background depth
-                    bg_depth = torch.linspace(0., 1., N_samples).view(
-                        [1, ] * len(dots_sh) + [N_samples,]).expand(dots_sh + [N_samples,]).to(rank)
-
-                # delete unused memory
-                del fg_near_depth
-                del step
-                torch.cuda.empty_cache()
-            else:
-                # sample pdf and concat with earlier samples
-                fg_weights_ = ret['fg_weights'].clone()
-                fg_weights = fg_weights_.detach()
-                fg_depth_mid = .5 * (fg_depth[..., 1:] + fg_depth[..., :-1])    # [..., N_samples-1]
-                fg_weights = fg_weights[..., 1:-1]                              # [..., N_samples-2]
-                fg_depth_samples = sample_pdf(bins=fg_depth_mid, weights=fg_weights,
-                                              N_samples=N_samples, det=True)    # [..., N_samples]
-                fg_depth, _ = torch.sort(torch.cat((fg_depth, fg_depth_samples), dim=-1))
-
-                if not train_box_only:
-
-                    # sample pdf and concat with earlier samples
-                    bg_weights = ret['bg_weights'].clone().detach()
-                    bg_depth_mid = .5 * (bg_depth[..., 1:] + bg_depth[..., :-1])
-                    bg_weights = bg_weights[..., 1:-1]                              # [..., N_samples-2]
-                    bg_depth_samples = sample_pdf(bins=bg_depth_mid, weights=bg_weights,
-                                                  N_samples=N_samples, det=True)    # [..., N_samples]
-                    bg_depth, _ = torch.sort(torch.cat((bg_depth, bg_depth_samples), dim=-1))
-
-                # delete unused memory
-                del fg_weights
-                del fg_depth_mid
-                del fg_depth_samples
-
-                if not train_box_only:
-                    del bg_weights
-                    del bg_depth_mid
-                    del bg_depth_samples
-                torch.cuda.empty_cache()
-
-            
-            print_gpu()
-            print('---tensorboard-----')
-            # writer.add_graph(net, [ray_o, ray_d, fg_far_depth, fg_depth, bg_depth,
-            #                        box_loc])
-
-
-
-
-            #with torch.no_grad():
-
-            if not have_box:
-                ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
-            elif not train_box_only:
-
-                # net  = net.double()
-                # ret = net(ray_o.double, ray_d.double, fg_far_depth.double, fg_depth.double, bg_depth.double, box_loc.double)
-                ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth,
-                          box_loc)
-            else:
-                ret = net(ray_o, ray_d, fg_far_depth, fg_depth)
-
-            # import torchvision.models as models
-            # print(y)
-
-            # g = make_dot(ret)
-            # g.view()
-
-            if use_ddp:
-                for key in ret:
-                    if key not in ['fg_weights', 'bg_weights']:
-                        if torch.is_tensor(ret[key]):
-                            if key not in ret_merge_chunk[m]:
-                                ret_merge_chunk[m][key] = [ret[key].cpu(), ]
-                            else:
-                                ret_merge_chunk[m][key].append(ret[key].cpu())
-
-                            ret[key] = None
-
-            # clean unused memory
-            torch.cuda.empty_cache()
-
-    if use_ddp:
-        # merge results from different chunks
-        for m in range(len(ret_merge_chunk)):
-            for key in ret_merge_chunk[m]:
-                ret_merge_chunk[m][key] = torch.cat(ret_merge_chunk[m][key], dim=0)
-
-
-        # merge results from different processes
-        if rank == 0:
-            ret_merge_rank = [OrderedDict() for _ in range(len(ret_merge_chunk))]
-            for m in range(len(ret_merge_chunk)):
-                for key in ret_merge_chunk[m]:
-                    # generate tensors to store results from other processes
-                    sh = list(ret_merge_chunk[m][key].shape[1:])
-                    ret_merge_rank[m][key] = [torch.zeros(*[size,]+sh, dtype=torch.float32) for size in rank_split_sizes]
-                    torch.distributed.gather(ret_merge_chunk[m][key], ret_merge_rank[m][key])
-                    ret_merge_rank[m][key] = torch.cat(ret_merge_rank[m][key], dim=0).reshape(
-                                                (ray_sampler.H, ray_sampler.W, -1)).squeeze()
-                    # print(m, key, ret_merge_rank[m][key].shape)
-        else:  # send results to main process
-            for m in range(len(ret_merge_chunk)):
-                for key in ret_merge_chunk[m]:
-                    torch.distributed.gather(ret_merge_chunk[m][key])
-
-    # only rank 0 program returns
-    if rank == 0:
-        return ret_merge_rank
-    else:
-        return None
-
 
 def log_view_to_tb(writer, global_step, log_data, gt_img, mask, gt_depth=None, train_box_only= False, have_box=False, prefix=''):
     rgb_im = img_HWC2CHW(torch.from_numpy(gt_img))
@@ -657,7 +433,7 @@ def create_nerf_noddp(args):
             for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
                 models[name].load_state_dict(to_load[name])
                 if name.startswith('net'):
-                    models[name].to(0)
+                    models[name].to(torch.cuda.current_device())
 
 
 
@@ -861,7 +637,7 @@ def ddp_train_nerf(rank, args):
         ray_batch = ray_samplers[i].random_sample(args.N_rand, center_crop=False)
         for key in ray_batch:
             if torch.is_tensor(ray_batch[key]):
-                ray_batch[key] = ray_batch[key].to(0)
+                ray_batch[key] = ray_batch[key].to(torch.cuda.current_device())
 
 
 
@@ -1089,7 +865,7 @@ def train():
     logger.info(parser.format_values())
 
 
-    ddp_train_nerf(rank=0, args=args)
+    ddp_train_nerf(rank=torch.cuda.current_device(), args=args)
 
 
 if __name__ == '__main__':

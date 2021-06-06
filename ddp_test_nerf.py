@@ -12,7 +12,7 @@ import time
 from data_loader_split import load_data_split
 from utils import mse2psnr, colorize_np, to8b
 import imageio
-from ddp_train_nerf import config_parser, setup_logger, setup, cleanup, render_single_image, create_nerf, render_single_image_noddp, create_nerf_noddp
+from ddp_train_nerf import config_parser, setup_logger, setup, cleanup, create_nerf, render_single_image_noddp, create_nerf_noddp
 import logging
 
 
@@ -41,8 +41,8 @@ def ddp_test_nerf_noddp(rank, args):
     for split in render_splits:
         out_dir = os.path.join(args.basedir, args.expname,
                                'render_{}_{:06d}'.format(split, start))
-        if rank == 0:
-            os.makedirs(out_dir, exist_ok=True)
+
+        os.makedirs(out_dir, exist_ok=True)
 
         ###### load data and create ray samplers; each process should do this
         ray_samplers = load_data_split(args.datadir, args.scene, split, try_load_min_depth=args.load_min_depth, \
@@ -63,54 +63,54 @@ def ddp_test_nerf_noddp(rank, args):
                                       train_box_only=False, have_box=True)
 
             dt = time.time() - time0
-            if rank == 0:  # only main process should do this
-                logger.info('Rendered {} in {} seconds'.format(fname, dt))
 
-                # only save last level
-                im = ret[-1]['rgb'].numpy()
-                # compute psnr if ground-truth is available
-                if ray_samplers[idx].img_path is not None:
-                    gt_im = ray_samplers[idx].get_img()
-                    psnr = mse2psnr(np.mean((gt_im - im) * (gt_im - im)))
-                    logger.info('{}: psnr={}'.format(fname, psnr))
+            logger.info('Rendered {} in {} seconds'.format(fname, dt))
 
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, fname), im)
+            # only save last level
+            im = ret[-1]['rgb'].numpy()
+            # compute psnr if ground-truth is available
+            if ray_samplers[idx].img_path is not None:
+                gt_im = ray_samplers[idx].get_img()
+                psnr = mse2psnr(np.mean((gt_im - im) * (gt_im - im)))
+                logger.info('{}: psnr={}'.format(fname, psnr))
 
-                im = ret[-1]['fg_rgb'].numpy()
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, 'fg_' + fname), im)
+            im = to8b(im)
+            imageio.imwrite(os.path.join(out_dir, fname), im)
 
-                im = ret[-1]['bg_rgb'].numpy()
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, 'bg_' + fname), im)
+            im = ret[-1]['fg_rgb'].numpy()
+            im = to8b(im)
+            imageio.imwrite(os.path.join(out_dir, 'fg_' + fname), im)
 
-                im = ret[-1]['fg_depth'].numpy()
-                im = colorize_np(im, cmap_name='jet', append_cbar=True)
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, 'fg_depth_' + fname), im)
+            im = ret[-1]['bg_rgb'].numpy()
+            im = to8b(im)
+            imageio.imwrite(os.path.join(out_dir, 'bg_' + fname), im)
 
-                im = ret[-1]['bg_depth'].numpy()
-                im = colorize_np(im, cmap_name='jet', append_cbar=True)
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, 'bg_depth_' + fname), im)
+            im = ret[-1]['fg_depth'].numpy()
+            im = colorize_np(im, cmap_name='jet', append_cbar=True)
+            im = to8b(im)
+            imageio.imwrite(os.path.join(out_dir, 'fg_depth_' + fname), im)
 
-                depth_clip = 100.
-                im = ret[-1]['depth_fgbg'].numpy()
-                im[
-                    im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
+            im = ret[-1]['bg_depth'].numpy()
+            im = colorize_np(im, cmap_name='jet', append_cbar=True)
+            im = to8b(im)
+            imageio.imwrite(os.path.join(out_dir, 'bg_depth_' + fname), im)
 
-                im = colorize_np(im, cmap_name='jet', append_cbar=True)
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, 'Depth_' + fname), im)
+            depth_clip = 100.
+            im = ret[-1]['depth_fgbg'].numpy()
+            im[
+                im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
 
-                im = ray_samplers[idx].get_depth()
-                im[
-                    im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
+            im = colorize_np(im, cmap_name='jet', append_cbar=True)
+            im = to8b(im)
+            imageio.imwrite(os.path.join(out_dir, 'Depth_' + fname), im)
 
-                im = colorize_np(im, cmap_name='jet', append_cbar=True)
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, 'DepthGT_' + fname), im)
+            im = ray_samplers[idx].get_depth()
+            im[
+                im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
+
+            im = colorize_np(im, cmap_name='jet', append_cbar=True)
+            im = to8b(im)
+            imageio.imwrite(os.path.join(out_dir, 'DepthGT_' + fname), im)
 
             torch.cuda.empty_cache()
 
@@ -231,7 +231,7 @@ def test():
     #                             nprocs=args.world_size,
     #                             join=True)
 
-    ddp_test_nerf_noddp(0, args)
+    ddp_test_nerf_noddp(torch.cuda.current_device(), args)
 
 
 if __name__ == '__main__':
