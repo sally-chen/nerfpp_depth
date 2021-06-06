@@ -637,7 +637,7 @@ def ddp_train_nerf(rank, args):
         ray_batch = ray_samplers[i].random_sample(args.N_rand, center_crop=False)
         for key in ray_batch:
             if torch.is_tensor(ray_batch[key]):
-                ray_batch[key] = ray_batch[key].to(torch.cuda.current_device())
+                ray_batch[key] = ray_batch[key].to(rank)
 
 
 
