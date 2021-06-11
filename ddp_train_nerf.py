@@ -1,13 +1,14 @@
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 import torch.optim
 import torch.distributed
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing
 import os
 from collections import OrderedDict
-from ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
-    NerfNetBoxOnlyWithAutoExpo, DepthOracleBig, DepthOracle
+from ddp_model import (NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo,
+                      NerfNetBoxOnlyWithAutoExpo, DepthOracle)
 
 from nerf_network import WrapperModule
 
@@ -15,9 +16,10 @@ import time
 from data_loader_split import load_data_split
 import numpy as np
 from tensorboardX import SummaryWriter
-from utils import img2mse, mse2psnr, entropy_loss, dep_l1l2loss, img_HWC2CHW, colorize, colorize_np,to8b, TINY_NUMBER
-
-from helpers import calculate_metrics, log_plot_conf_mat, visualize_depth_label, loss_deviation
+from utils import (img2mse, mse2psnr, entropy_loss, dep_l1l2loss, img_HWC2CHW,
+                    colorize, colorize_np,to8b, TINY_NUMBER, normalize_torch)
+from helpers import (calculate_metrics, log_plot_conf_mat,
+                        visualize_depth_label, loss_deviation)
 import logging
 import json
 
@@ -200,9 +202,14 @@ def eval_oracle(rays, net_oracle, fg_bg_net, use_zval):
         ret['likeli_bg'] = ret['likeli'][:, front_sample:]
     return ret
 
-def get_depths(data, front_sample, back_sample, fg_z_vals_centre, bg_z_vals_centre, samples, train_box_only=False):
+def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
+               bg_z_vals_centre, samples, box_weights=None, train_box_only=False):
     fg_depth_mid = fg_z_vals_centre
-    fg_weights = data['likeli_fg'][:, 2:front_sample].clone() # Avoid inplace ops
+    fg_weights = data['likeli_fg'].clone() # Avoid inplace ops
+    fg_weights = F.softmax(fg_weights, dim=-1)[:, 2:front_sample]
+
+    if box_weights is not None:
+        fg_weights = fg_weights + normalize_torch(box_weights[:, 1:])
 
 
     fg_weights[fg_depth_mid[:,:-1]<0.] =0.
@@ -214,12 +221,13 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre, bg_z_vals_cent
         # sample pdf and concat with earlier samples
         # bg_weights = ret['bg_weights'].clone().detach()
         # bg_depth_mid = .5 * (bg_depth[..., 1:] + bg_depth[..., :-1])
-        # bg_weights = bg_weights[..., 1:-1]                              # [..., N_samples-2]
+        # bg_weights = bg_weights[..., 1:-1]               # [..., N_samples-2]
 
         bg_depth_mid = bg_z_vals_centre
 
 
-        bg_weights = data['likeli_bg'][:, 1: back_sample-1].clone()
+        bg_weights = data['likeli_bg'].clone()
+        bg_weights = F.softmax(bg_weights, dim=-1)[:, 1:back_sample-1]
         bg_weights[bg_depth_mid[:,:-1]<0.] =0.
         bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                               N_samples=samples, det=False))  # [..., N_samples]
@@ -252,9 +260,18 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
         for m in range(models['cascade_level']):
             net = models['net_{}'.format(m)]
             samples = models['cascade_samples'][m]
+
+            box_weights = None
+            if box_loc is not None:
+                box_ret = net(ray_o, ray_d, fg_far_depth, fg_z_vals_centre,
+                              bg_z_vals=None, box_loc=box_loc,
+                              query_box_only=True)
+                box_weights = box_ret['fg_box_sig']
+
             fg_depth, bg_depth = get_depths(ret, front_sample, back_sample,
                                             fg_z_vals_centre, bg_z_vals_centre,
-                                            samples, train_box_only)
+                                            samples, box_weights, train_box_only)
+
 
             if not have_box:
                 ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)

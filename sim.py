@@ -31,14 +31,21 @@ class Sim:
         cleanup()
 
 
-#   @torch.no_grad()
+    @torch.no_grad()
     def run(self, i, x, c, max_depth=60):
 
         ray_samplers = load_data_array([i], [x], [c],
-                                       self.h, self.w, False, True, True)
+                self.h, self.w, False, True, True)
 
         time0 = time.time()
-        ret = render_single_image(self.models, ray_samplers[0], 256)
+        ret = render_single_image(self.models, ray_samplers[0], 256,
+                                  have_box=self.args.have_box,
+                                  train_box_only=self.args.train_box_only,
+                                  donerf_pretrain=self.args.donerf_pretrain,
+                                  front_sample=self.args.front_sample,
+                                  back_sample=self.args.back_sample,
+                                  fg_bg_net=self.args.fg_bg_net,
+                                  use_zval=self.args.use_zval)
         dt = time.time() - time0
         logger.info('Rendered {} in {} seconds'.format(0, dt))
 
@@ -67,10 +74,10 @@ def test():
     # locs: [xloc yloc], height of camera is fixed in the code
 
     [poses, intrs, locs] = pickle.load(
-        open('./data/inf_test/test/sample_arrs', 'rb'))
+            open('./data/inf_test/test/sample_arrs', 'rb'))
 
-    H = 32 # high of image desired
-    W = 100 # width of image desired
+    H = 320 # high of image desired
+    W = 640 # width of image desired
     depth_clip = 60.  # clip depth
 
     intrs = [torch.from_numpy(intr).cuda() for intr in intrs]
@@ -87,9 +94,9 @@ def test():
     bd = to8b(bd)
     imageio.imwrite("rgb_{}.png".format(i), brgb)
     imageio.imwrite("d_{}.png".format(i), bd)
-    A = d.sum()
-    A.backward()
-    print(poses[0].grad)
+#    A = d.sum()
+#    A.backward()
+#    print(poses[0].grad)
 
 
 

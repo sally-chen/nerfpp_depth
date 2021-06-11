@@ -8,6 +8,7 @@ from collections import OrderedDict
 from nerf_network import Embedder, MLPNet, MLPNetClassier
 import os
 import logging
+
 logger = logging.getLogger(__package__)
 
 
@@ -20,32 +21,32 @@ def depth2pts_outside(ray_o, ray_d, depth):
     depth: [...]; inverse of distance to sphere origin
     '''
     # note: d1 becomes negative if this mid point is behind camera
-    d1 = -torch.sum(ray_d * ray_o, dim=-1) / torch.sum(ray_d * ray_d, dim=-1)   # tb
-    p_mid = ray_o + d1.unsqueeze(-1) * ray_d #b
+    d1 = -torch.sum(ray_d * ray_o, dim=-1) / torch.sum(ray_d * ray_d, dim=-1)  # tb
+    p_mid = ray_o + d1.unsqueeze(-1) * ray_d  # b
     p_mid_norm = torch.norm(p_mid, dim=-1)
-    ray_d_cos = 1. / (torch.norm(ray_d, dim=-1)+0.0001)
+    ray_d_cos = 1. / (torch.norm(ray_d, dim=-1) + 0.0001)
     d2 = torch.sqrt(1. - p_mid_norm * p_mid_norm) * ray_d_cos
     p_sphere = ray_o + (d1 + d2).unsqueeze(-1) * ray_d
 
     rot_axis = torch.cross(ray_o, p_sphere, dim=-1)
-    rot_axis = rot_axis / (torch.norm(rot_axis, dim=-1, keepdim=True)+0.0001)
+    rot_axis = rot_axis / (torch.norm(rot_axis, dim=-1, keepdim=True) + 0.0001)
     phi = torch.asin(p_mid_norm)
     theta = torch.asin(p_mid_norm * depth)  # depth is inside [0, 1]
-    rot_angle = (phi - theta).unsqueeze(-1)     # [..., 1]
+    rot_angle = (phi - theta).unsqueeze(-1)  # [..., 1]
 
     # now rotate p_sphere
     # Rodrigues formula: https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
     p_sphere_new = p_sphere * torch.cos(rot_angle) + \
                    torch.cross(rot_axis, p_sphere, dim=-1) * torch.sin(rot_angle) + \
-                   rot_axis * torch.sum(rot_axis*p_sphere, dim=-1, keepdim=True) * (1.-torch.cos(rot_angle))
+                   rot_axis * torch.sum(rot_axis * p_sphere, dim=-1, keepdim=True) * (1. - torch.cos(rot_angle))
     p_sphere_new = p_sphere_new / torch.norm(p_sphere_new, dim=-1, keepdim=True)
     pts = torch.cat((p_sphere_new, depth.unsqueeze(-1)), dim=-1)
 
-
-
     # now calculate conventional depth
+    # torch.cos(theta) = pmid --> edge of sphere
     depth_real = 1. / (depth + TINY_NUMBER) * torch.cos(theta) * ray_d_cos + d1
     return pts, depth_real
+
 
 def depth2pts_outside_np(ray_o, ray_d, depth):
     '''
@@ -53,91 +54,34 @@ def depth2pts_outside_np(ray_o, ray_d, depth):
     depth: [...]; inverse of distance to sphere origin
     '''
     # note: d1 becomes negative if this mid point is behind camera
-    d1 = -np.sum(ray_d * ray_o, axis=-1) / np.sum(ray_d * ray_d, axis=-1)   # tb
-    p_mid = ray_o + d1[...,None] * ray_d #b
+    d1 = -np.sum(ray_d * ray_o, axis=-1) / np.sum(ray_d * ray_d, axis=-1)  # tb
+    p_mid = ray_o + d1[..., None] * ray_d  # b
     p_mid_norm = np.linalg.norm(p_mid, axis=-1)
-    ray_d_cos = 1. / (np.linalg.norm(ray_d, axis=-1)+0.0001)
+    ray_d_cos = 1. / (np.linalg.norm(ray_d, axis=-1) + 0.0001)
     d2 = np.sqrt(1. - p_mid_norm * p_mid_norm) * ray_d_cos
-    p_sphere = ray_o + (d1 + d2)[...,None] * ray_d
+    p_sphere = ray_o + (d1 + d2)[..., None] * ray_d
 
     rot_axis = np.cross(ray_o, p_sphere, axis=-1)
-    rot_axis = rot_axis / (np.linalg.norm(rot_axis, axis=-1, keepdims=True)+0.0001)
+    rot_axis = rot_axis / (np.linalg.norm(rot_axis, axis=-1, keepdims=True) + 0.0001)
     phi = np.arcsin(p_mid_norm)
-    theta = np.arcsin(p_mid_norm[...,None] * depth)  # depth is inside [0, 1]
-    rot_angle = (phi[..., None]  - theta)[..., None]     # [..., 1]
+    theta = np.arcsin(p_mid_norm[..., None] * depth)  # depth is inside [0, 1]
+    rot_angle = (phi[..., None] - theta)[..., None]  # [..., 1]
 
     # now rotate p_sphere
     # Rodrigues formula: https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
 
-
     # print("p_sphere:{} rot_angle {} rot_axis {}".format(p_sphere.shape,rot_angle.shape,rot_axis.shape))
 
-    term1 = p_sphere[...,None,:] * np.cos(rot_angle)
-    term2 = np.cross(rot_axis, p_sphere, axis=-1)[...,None,:]* np.sin(rot_angle)
-    term3 = (rot_axis * np.sum(rot_axis*p_sphere, axis=-1, keepdims=True))[...,None,:] * (1.-np.cos(rot_angle))
+    term1 = p_sphere[..., None, :] * np.cos(rot_angle)
+    term2 = np.cross(rot_axis, p_sphere, axis=-1)[..., None, :] * np.sin(rot_angle)
+    term3 = (rot_axis * np.sum(rot_axis * p_sphere, axis=-1, keepdims=True))[..., None, :] * (1. - np.cos(rot_angle))
     p_sphere_new = term1 + term2 + term3
     p_sphere_new = p_sphere_new / np.linalg.norm(p_sphere_new, axis=-1, keepdims=True)
-    pts = np.concatenate((p_sphere_new, depth[...,None]), axis=-1)
+    pts = np.concatenate((p_sphere_new, depth[..., None]), axis=-1)
     # now calculate conventional depth
-    depth_real = 1. / (depth + TINY_NUMBER) * np.cos(theta) * ray_d_cos[...,None] + d1[...,None]
+    depth_real = 1. / (depth + TINY_NUMBER) * np.cos(theta) * ray_d_cos[..., None] + d1[..., None]
     return pts, depth_real
 
-
-class DepthOracleBig(nn.Module):
-
-    def __init__(self, args):
-        super().__init__()
-
-
-        self.pencode = args.pencode
-        self.use_zval = args.use_zval
-
-        if self.use_zval:
-            pos_ch = args.front_sample - 1  + args.back_sample - 1
-        else:
-            pos_ch = (args.front_sample - 1) * 3 + (args.back_sample - 1) * 4
-
-        if self.pencode:
-            self.embedder_position = Embedder(input_dim=3,
-                                              max_freq_log2=args.max_freq_log2 - 1,
-                                              N_freqs=args.max_freq_log2)
-            self.embedder_viewdir = Embedder(input_dim=3,
-                                             max_freq_log2=args.max_freq_log2_viewdirs - 1,
-                                             N_freqs=args.max_freq_log2_viewdirs)
-
-            self.ora_net = MLPNetClassier(input_ch=self.embedder_position.out_dim, input_ch_viewdirs=self.embedder_viewdir.out_dim, D=args.netdepth,
-                                          W=args.netwidth,
-                                          pos_ch=pos_ch,
-                                          out_dim=args.front_sample + args.back_sample)
-
-        else:
-            self.ora_net = MLPNetClassier(input_ch=3 , input_ch_viewdirs=3 , D=args.netdepth,
-                                          W=args.netwidth,
-                                          pos_ch=pos_ch,
-                                          out_dim=args.front_sample + args.back_sample)
-
-    def forward(self, ray_o, ray_d, points):
-        '''
-       :param ray_o, ray_d: [N_rays, 3]
-       :param cls_label: [N_rays, N_samples]
-       :param points: [N_rays, 3*N_front_sample +4 * N_back_samples]
-       :return
-       '''
-
-
-
-        ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
-        viewdirs = ray_d / ray_d_norm  # [..., 3]
-        if self.pencode:
-            viewdirs = self.embedder_viewdir(viewdirs)
-            ray_o = self.embedder_position(ray_o)
-
-        # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
-
-        depth_likeli = self.ora_net(ray_o,viewdirs, points)
-
-        ret = OrderedDict([('likeli', depth_likeli)])
-        return ret
 
 
 class DepthOracle(nn.Module):
@@ -158,18 +102,15 @@ class DepthOracle(nn.Module):
             pos_ch_bg = (args.back_sample - 1) * 4
 
         if self.penc_pts:
-
-
-
             self.embedder_pts = Embedder(input_dim=pos_ch_fg,
-                                              max_freq_log2=args.max_freq_log2_pts - 1,
-                                              N_freqs=args.max_freq_log2_pts)
-
-            self.embedder_pts_bg = Embedder(input_dim=pos_ch_bg,
                                          max_freq_log2=args.max_freq_log2_pts - 1,
                                          N_freqs=args.max_freq_log2_pts)
-            pos_ch_fg  = self.embedder_pts.out_dim
-            pos_ch_bg  = self.embedder_pts_bg.out_dim
+
+            self.embedder_pts_bg = Embedder(input_dim=pos_ch_bg,
+                                            max_freq_log2=args.max_freq_log2_pts - 1,
+                                            N_freqs=args.max_freq_log2_pts)
+            pos_ch_fg = self.embedder_pts.out_dim
+            pos_ch_bg = self.embedder_pts_bg.out_dim
 
         if self.pencode:
             self.embedder_position = Embedder(input_dim=3,
@@ -179,31 +120,29 @@ class DepthOracle(nn.Module):
                                              max_freq_log2=args.max_freq_log2_viewdirs - 1,
                                              N_freqs=args.max_freq_log2_viewdirs)
 
-
-
             self.ora_net_fg = MLPNetClassier(input_ch=self.embedder_position.out_dim,
-                                          input_ch_viewdirs=self.embedder_viewdir.out_dim, D=args.netdepth,
-                                          W=args.netwidth,
-                                          pos_ch=pos_ch_fg,
-                                          out_dim=args.front_sample )
+                                             input_ch_viewdirs=self.embedder_viewdir.out_dim, D=args.netdepth,
+                                             W=args.netwidth,
+                                             pos_ch=pos_ch_fg,
+                                             out_dim=args.front_sample)
 
             self.embedder_position_bg = Embedder(input_dim=3,
-                                              max_freq_log2=args.max_freq_log2 - 1,
-                                              N_freqs=args.max_freq_log2)
+                                                 max_freq_log2=args.max_freq_log2 - 1,
+                                                 N_freqs=args.max_freq_log2)
 
             self.ora_net_bg = MLPNetClassier(input_ch=self.embedder_position_bg.out_dim,
-                                          input_ch_viewdirs=self.embedder_viewdir.out_dim, D=args.netdepth,
-                                          W=args.netwidth,
-                                          pos_ch=pos_ch_bg,
-                                          out_dim= args.back_sample)
+                                             input_ch_viewdirs=self.embedder_viewdir.out_dim, D=args.netdepth,
+                                             W=args.netwidth,
+                                             pos_ch=pos_ch_bg,
+                                             out_dim=args.back_sample)
         else:
 
             self.ora_net_fg = MLPNetClassier(D=args.netdepth, W=args.netwidth,
-                                          pos_ch=pos_ch_fg,
-                                          out_dim=args.front_sample )
+                                             pos_ch=pos_ch_fg,
+                                             out_dim=args.front_sample)
 
             self.ora_net_bg = MLPNetClassier(D=args.netdepth, W=args.netwidth,
-                                             pos_ch= pos_ch_bg,
+                                             pos_ch=pos_ch_bg,
                                              out_dim=args.back_sample)
 
     def forward(self, ray_o, ray_d, points_fg, points_bg, fg_far_depth):
@@ -226,19 +165,15 @@ class DepthOracle(nn.Module):
             ray_o_bg = self.embedder_position_bg(ray_o_bg)
 
         if self.penc_pts:
-            points_fg  = self.embedder_pts(points_fg)
-            points_bg  = self.embedder_pts_bg(points_bg)
-
+            points_fg = self.embedder_pts(points_fg)
+            points_bg = self.embedder_pts_bg(points_bg)
 
         depth_likeli_fg = self.ora_net_fg(ray_o, viewdirs, points_fg)
         depth_likeli_bg = self.ora_net_bg(ray_o_bg, viewdirs, points_bg)
 
-
         ret = OrderedDict([('likeli_fg', depth_likeli_fg), ('likeli_bg', depth_likeli_bg)])
 
         return ret
-
-
 
 
 class NerfNet(nn.Module):
@@ -275,10 +210,9 @@ class NerfNet(nn.Module):
         :return
         '''
 
-
         # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
         ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
-        viewdirs = ray_d / ray_d_norm      # [..., 3]
+        viewdirs = ray_d / ray_d_norm  # [..., 3]
         dots_sh = list(ray_d.shape[:-1])
 
         ######### render foreground
@@ -293,14 +227,15 @@ class NerfNet(nn.Module):
         # alpha blending
         fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
         # account for view directions
-        fg_dists = ray_d_norm * torch.cat((fg_dists, fg_z_max.unsqueeze(-1) - fg_z_vals[..., -1:]), dim=-1)  # [..., N_samples]
+        fg_dists = ray_d_norm * torch.cat((fg_dists, fg_z_max.unsqueeze(-1) - fg_z_vals[..., -1:]),
+                                          dim=-1)  # [..., N_samples]
         fg_alpha = 1. - torch.exp(-fg_raw['sigma'] * fg_dists)  # [..., N_samples]
-        T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)   # [..., N_samples]
+        T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)  # [..., N_samples]
         bg_lambda = T[..., -1]
         T = torch.cat((torch.ones_like(T[..., 0:1]), T[..., :-1]), dim=-1)  # [..., N_samples]
-        fg_weights = fg_alpha * T     # [..., N_samples]
+        fg_weights = fg_alpha * T  # [..., N_samples]
         fg_rgb_map = torch.sum(fg_weights.unsqueeze(-1) * fg_raw['rgb'], dim=-2)  # [..., 3]
-        fg_depth_map = torch.sum(fg_weights * fg_z_vals, dim=-1)     # [...,]
+        fg_depth_map = torch.sum(fg_weights * fg_z_vals, dim=-1)  # [...,]
 
         # render background
         N_samples = bg_z_vals.shape[-1]
@@ -311,8 +246,8 @@ class NerfNet(nn.Module):
         input = torch.cat((self.bg_embedder_position(bg_pts),
                            self.bg_embedder_viewdir(bg_viewdirs)), dim=-1)
         # near_depth: physical far; far_depth: physical near
-        input = torch.flip(input, dims=[-2,])
-        bg_z_vals = torch.flip(bg_z_vals, dims=[-1,])           # 1--->0
+        input = torch.flip(input, dims=[-2, ])
+        bg_z_vals = torch.flip(bg_z_vals, dims=[-1, ])  # 1--->0
         bg_dists = bg_z_vals[..., :-1] - bg_z_vals[..., 1:]
         bg_dists = torch.cat((bg_dists, HUGE_NUMBER * torch.ones_like(bg_dists[..., 0:1])), dim=-1)  # [..., N_samples]
         bg_raw = self.bg_net(input)
@@ -329,11 +264,11 @@ class NerfNet(nn.Module):
         bg_rgb_map = bg_lambda.unsqueeze(-1) * bg_rgb_map
         bg_depth_map = bg_lambda * bg_depth_map
         rgb_map = fg_rgb_map + bg_rgb_map
-        
+
         _, bg_depth_map = depth2pts_outside(ray_o, ray_d, bg_depth_map)
         bg_depth_map = bg_lambda * bg_depth_map
         depth_map = fg_depth_map + bg_depth_map
-        
+
         # device = torch.cuda.device('cuda:0')
         # max = torch.tensor([100., 140.], device=torch.device('cuda:0'))
         # min = torch.tensor([85., 125.], device=torch.device('cuda:0'))
@@ -343,11 +278,10 @@ class NerfNet(nn.Module):
         # ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
         # depth_map = torch.norm(depth_pt_denorm[:,:2] - ro_denorm, dim=1, keepdim=False)
 
-                                                                 
-        ret = OrderedDict([('rgb', rgb_map),            # loss
+        ret = OrderedDict([('rgb', rgb_map),  # loss
                            ('fg_weights', fg_weights),  # importance sampling
                            ('bg_weights', bg_weights),  # importance sampling
-                           ('fg_rgb', fg_rgb_map),      # below are for logging
+                           ('fg_rgb', fg_rgb_map),  # below are for logging
                            ('fg_depth', fg_depth_map),
                            ('bg_rgb', bg_rgb_map),
                            ('bg_depth', bg_depth_map),
@@ -355,23 +289,24 @@ class NerfNet(nn.Module):
                            ('depth_fgbg', depth_map)])
         return ret
 
+
 class NerfNetBoxOnly(nn.Module):
     def __init__(self, args):
         super().__init__()
 
         self.embedder_position = Embedder(input_dim=3,
-                                             max_freq_log2=args.max_freq_log2 - 1,
-                                             N_freqs=args.max_freq_log2)
+                                          max_freq_log2=args.max_freq_log2 - 1,
+                                          N_freqs=args.max_freq_log2)
 
         self.embedder_viewdir = Embedder(input_dim=3,
-                                            max_freq_log2=args.max_freq_log2_viewdirs - 1,
-                                            N_freqs=args.max_freq_log2_viewdirs)
+                                         max_freq_log2=args.max_freq_log2_viewdirs - 1,
+                                         N_freqs=args.max_freq_log2_viewdirs)
 
         # input to this should be box position and sampled position
         self.box_net = MLPNet(D=args.netdepth, W=args.netwidth,
-                             input_ch=self.embedder_position.out_dim,
-                             input_ch_viewdirs=self.embedder_viewdir.out_dim,
-                             use_viewdirs=args.use_viewdirs)
+                              input_ch=self.embedder_position.out_dim,
+                              input_ch_viewdirs=self.embedder_viewdir.out_dim,
+                              use_viewdirs=args.use_viewdirs)
 
     def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals):
         '''orch.c
@@ -416,9 +351,9 @@ class NerfNetBoxOnly(nn.Module):
 
         # rgb_map = fg_rgb_map
         ret = OrderedDict([('rgb', rgb_map),  # loss
-               ('fg_weights', fg_weights),  # importance sampling
-               ('fg_rgb', fg_rgb_map),  # below are for logging
-               ('fg_depth', fg_depth_map)])
+                           ('fg_weights', fg_weights),  # importance sampling
+                           ('fg_rgb', fg_rgb_map),  # below are for logging
+                           ('fg_depth', fg_depth_map)])
         return ret
 
 
@@ -451,11 +386,11 @@ class NerfNetBox(nn.Module):
 
         # input to this should be box position and sampled position
         self.box_net = MLPNet(D=args.netdepth, W=args.netwidth,
-                             input_ch=self.fg_embedder_position.out_dim,
-                             input_ch_viewdirs=self.fg_embedder_viewdir.out_dim,
-                             use_viewdirs=args.use_viewdirs)
+                              input_ch=self.fg_embedder_position.out_dim,
+                              input_ch_viewdirs=self.fg_embedder_viewdir.out_dim,
+                              use_viewdirs=args.use_viewdirs)
 
-    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc):
+    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only=False):
         '''orch.c
         :param ray_o, ray_d: [..., 3]
         :param fg_z_max: [...,]
@@ -463,9 +398,10 @@ class NerfNetBox(nn.Module):
         :param box_locs: [..., 3]  (N. [x,y, z])
         :return
         '''
+
         # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
         ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
-        viewdirs = ray_d / ray_d_norm      # [..., 3]
+        viewdirs = ray_d / ray_d_norm  # [..., 3]
         dots_sh = list(ray_d.shape[:-1])
 
         ######### render foreground
@@ -474,36 +410,44 @@ class NerfNetBox(nn.Module):
         fg_ray_d = ray_d.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
         fg_viewdirs = viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
         fg_pts = fg_ray_o + fg_z_vals.unsqueeze(-1) * fg_ray_d
-        input = torch.cat((self.fg_embedder_position(fg_pts),
-                           self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
-        fg_raw = self.fg_net(input)
-
 
         ######
         # get output from boxnet
-        box_offset = (fg_pts - box_loc.unsqueeze(-2))*0.5
+        # convert to the box coordinate
+        box_offset = (fg_pts - box_loc.unsqueeze(
+            -2)) * 0.5  # 0.5 is because the box model was trained in different coordinates before?
         input_box = torch.cat((self.fg_embedder_position(box_offset),
-                           self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
+                               self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
         fg_box_raw = self.box_net(input_box.float())
 
         ######
 
+        if query_box_only:
+            ret = OrderedDict([('fg_box_sig', fg_box_raw['sigma'])])
+            return ret
 
+        input = torch.cat((self.fg_embedder_position(fg_pts),
+                           self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
+        fg_raw = self.fg_net(input)
 
         # alpha blending
         fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
         # account for view directions
-        fg_dists = ray_d_norm * torch.cat((fg_dists, fg_z_max.unsqueeze(-1) - fg_z_vals[..., -1:]), dim=-1)  # [..., N_samples]
+        fg_dists = ray_d_norm * torch.cat((fg_dists, fg_z_max.unsqueeze(-1) - fg_z_vals[..., -1:]),
+                                          dim=-1)  # [..., N_samples]
         fg_alpha = 1. - torch.exp(-(fg_raw['sigma'] + fg_box_raw['sigma']) * fg_dists)  # [..., N_samples]
-        T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)   # [..., N_samples]
+        T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)  # [..., N_samples]
         bg_lambda = T[..., -1]
         T = torch.cat((torch.ones_like(T[..., 0:1]), T[..., :-1]), dim=-1)  # [..., N_samples]
-        fg_weights = fg_alpha * T     # [..., N_samples]
+        fg_weights = fg_alpha * T  # [..., N_samples]
 
-        fg_rgb = torch.div(fg_raw['sigma'].unsqueeze(-1) * fg_raw['rgb'] + fg_box_raw['sigma'].unsqueeze(-1) * fg_box_raw['rgb'], fg_raw['sigma'].unsqueeze(-1) + fg_box_raw['sigma'].unsqueeze(-1))
+        fg_rgb = torch.div(
+            fg_raw['sigma'].unsqueeze(-1) * fg_raw['rgb'] + fg_box_raw['sigma'].unsqueeze(-1) * fg_box_raw['rgb'],
+            fg_raw['sigma'].unsqueeze(-1) + fg_box_raw['sigma'].unsqueeze(-1))
 
         fg_rgb_map = torch.sum(fg_weights.unsqueeze(-1) * fg_rgb, dim=-2)  # [..., 3]
-        fg_depth_map = torch.sum(fg_weights * fg_z_vals, dim=-1)     # [...,]     ############################bg_depth_map################################
+        fg_depth_map = torch.sum(fg_weights * fg_z_vals,
+                                 dim=-1)  # [...,]     ############################bg_depth_map################################
 
         # render background
         N_samples = bg_z_vals.shape[-1]
@@ -515,8 +459,8 @@ class NerfNetBox(nn.Module):
         input = torch.cat((self.bg_embedder_position(bg_pts),
                            self.bg_embedder_viewdir(bg_viewdirs)), dim=-1)
         # near_depth: physical far; far_depth: physical near
-        input = torch.flip(input, dims=[-2,])
-        bg_z_vals = torch.flip(bg_z_vals, dims=[-1,])           # 1--->0
+        input = torch.flip(input, dims=[-2, ])
+        bg_z_vals = torch.flip(bg_z_vals, dims=[-1, ])  # 1--->0
         bg_dists = bg_z_vals[..., :-1] - bg_z_vals[..., 1:]
         bg_dists = torch.cat((bg_dists, HUGE_NUMBER * torch.ones_like(bg_dists[..., 0:1])), dim=-1)  # [..., N_samples]
         bg_raw = self.bg_net(input)
@@ -525,8 +469,6 @@ class NerfNetBox(nn.Module):
         # get output from boxnet
         ######
 
-
-
         bg_alpha = 1. - torch.exp(-bg_raw['sigma'] * bg_dists)  # [..., N_samples]
         # Eq. (3): T
         # maths show weights, and summation of weights along a ray, are always inside [0, 1]
@@ -534,49 +476,46 @@ class NerfNetBox(nn.Module):
         T = torch.cat((torch.ones_like(T[..., 0:1]), T), dim=-1)  # [..., N_samples]
         bg_weights = bg_alpha * T  # [..., N_samples]
         bg_rgb_map = torch.sum(bg_weights.unsqueeze(-1) * bg_raw['rgb'], dim=-2)  # [..., 3]
-        bg_depth_map = torch.sum(bg_weights * bg_z_vals, dim=-1)  # [...,]  ############################bg_depth_map################################
+        bg_depth_map = torch.sum(bg_weights * bg_z_vals,
+                                 dim=-1)  # [...,]  ############################bg_depth_map################################
         # bg_depth_map = torch.sum(bg_weights * bg_depth_real, dim=-1)
 
         # composite foreground and background
         bg_rgb_map = bg_lambda.unsqueeze(-1) * bg_rgb_map
-
 
         _, bg_depth_map = depth2pts_outside(ray_o, ray_d, bg_depth_map)
         bg_depth_map = bg_lambda * bg_depth_map
 
         depth_map = fg_depth_map + bg_depth_map
 
-
         rgb_map = fg_rgb_map + bg_rgb_map
         ## combine foregroung and background in the right depth unit s well
 
         ## need inverse normalization
-        device = torch.cuda.device('cuda:0')
-
-        max = torch.tensor([100., 140.], device=torch.device('cuda:0'))
-        min = torch.tensor([85., 125.], device=torch.device('cuda:0'))
-        avg_pose = torch.tensor([0.5,  0.5], device=torch.device('cuda:0'))
-
-        depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (max-min) + min
-        ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
-        depth_map = torch.norm(depth_pt_denorm[:,:2] - ro_denorm, dim=1, keepdim=False)
-
-
-
-        ##
-        #ret = [rgb_map,fg_weights,bg_weights,fg_rgb_map,fg_depth_map,bg_rgb_map,bg_depth_map,bg_lambda,depth_map]
+        # device = torch.cuda.device('cuda:0')
+        #
+        # max = torch.tensor([100., 140.], device=torch.device('cuda:0'))
+        # min = torch.tensor([85., 125.], device=torch.device('cuda:0'))
+        # avg_pose = torch.tensor([0.5, 0.5], device=torch.device('cuda:0'))
+        #
+        # depth_pt_denorm = ((ray_o[:, :2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (
+        #             max - min) + min
+        # ro_denorm = ((ray_o[:, :2]) / 0.5 + avg_pose) * (max - min) + min
+        # depth_map = torch.norm(depth_pt_denorm[:, :2] - ro_denorm, dim=1, keepdim=False)
+        #
+        # ##
+        # ret = [rgb_map,fg_weights,bg_weights,fg_rgb_map,fg_depth_map,bg_rgb_map,bg_depth_map,bg_lambda,depth_map]
         ## somehow denoise pls
-        ret = OrderedDict([('rgb', rgb_map),            # loss
+        ret = OrderedDict([('rgb', rgb_map),  # loss
                            ('fg_weights', fg_weights),  # importance sampling
                            ('bg_weights', bg_weights),  # importance sampling
-                           ('fg_rgb', fg_rgb_map),      # below are for logging
+                           ('fg_rgb', fg_rgb_map),  # below are for logging
                            ('fg_depth', fg_depth_map),
                            ('bg_rgb', bg_rgb_map),
                            ('bg_depth', bg_depth_map),
                            ('bg_lambda', bg_lambda),
                            ('depth_fgbg', depth_map)])
         return ret
-
 
 
 def remap_name(name):
@@ -589,6 +528,7 @@ def remap_name(name):
             idx = name[:idx].rfind('/')
     return name[idx + 1:]
 
+
 class NerfNetWithAutoExpo(nn.Module):
     def __init__(self, args, optim_autoexpo=False, img_names=None):
         super().__init__()
@@ -596,12 +536,13 @@ class NerfNetWithAutoExpo(nn.Module):
 
         self.optim_autoexpo = optim_autoexpo
         if self.optim_autoexpo:
-            assert(img_names is not None)
+            assert (img_names is not None)
             logger.info('Optimizing autoexposure!')
 
             self.img_names = [remap_name(x) for x in img_names]
             logger.info('\n'.join(self.img_names))
-            self.autoexpo_params = nn.ParameterDict(OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
+            self.autoexpo_params = nn.ParameterDict(
+                OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
 
     def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, img_name=None):
         '''
@@ -616,11 +557,12 @@ class NerfNetWithAutoExpo(nn.Module):
             img_name = remap_name(img_name)
         if self.optim_autoexpo and (img_name in self.autoexpo_params):
             autoexpo = self.autoexpo_params[img_name]
-            scale = torch.abs(autoexpo[0]) + 0.5 # make sure scale is always positive
+            scale = torch.abs(autoexpo[0]) + 0.5  # make sure scale is always positive
             shift = autoexpo[1]
             ret['autoexpo'] = (scale, shift)
 
         return ret
+
 
 class NerfNetWithAutoExpo(nn.Module):
     def __init__(self, args, optim_autoexpo=False, img_names=None):
@@ -629,12 +571,13 @@ class NerfNetWithAutoExpo(nn.Module):
 
         self.optim_autoexpo = optim_autoexpo
         if self.optim_autoexpo:
-            assert(img_names is not None)
+            assert (img_names is not None)
             logger.info('Optimizing autoexposure!')
 
             self.img_names = [remap_name(x) for x in img_names]
             logger.info('\n'.join(self.img_names))
-            self.autoexpo_params = nn.ParameterDict(OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
+            self.autoexpo_params = nn.ParameterDict(
+                OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
 
     def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, img_name=None):
         '''
@@ -649,11 +592,12 @@ class NerfNetWithAutoExpo(nn.Module):
             img_name = remap_name(img_name)
         if self.optim_autoexpo and (img_name in self.autoexpo_params):
             autoexpo = self.autoexpo_params[img_name]
-            scale = torch.abs(autoexpo[0]) + 0.5 # make sure scale is always positive
+            scale = torch.abs(autoexpo[0]) + 0.5  # make sure scale is always positive
             shift = autoexpo[1]
             ret['autoexpo'] = (scale, shift)
 
         return ret
+
 
 class NerfNetBoxOnlyWithAutoExpo(nn.Module):
     def __init__(self, args, optim_autoexpo=False, img_names=None):
@@ -662,12 +606,13 @@ class NerfNetBoxOnlyWithAutoExpo(nn.Module):
 
         self.optim_autoexpo = optim_autoexpo
         if self.optim_autoexpo:
-            assert(img_names is not None)
+            assert (img_names is not None)
             logger.info('Optimizing autoexposure!')
 
             self.img_names = [remap_name(x) for x in img_names]
             logger.info('\n'.join(self.img_names))
-            self.autoexpo_params = nn.ParameterDict(OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
+            self.autoexpo_params = nn.ParameterDict(
+                OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
 
     def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, img_name=None):
         '''
@@ -683,7 +628,7 @@ class NerfNetBoxOnlyWithAutoExpo(nn.Module):
             img_name = remap_name(img_name)
         if self.optim_autoexpo and (img_name in self.autoexpo_params):
             autoexpo = self.autoexpo_params[img_name]
-            scale = torch.abs(autoexpo[0]) + 0.5 # make sure scale is always positive
+            scale = torch.abs(autoexpo[0]) + 0.5  # make sure scale is always positive
             shift = autoexpo[1]
             ret['autoexpo'] = (scale, shift)
 
@@ -697,14 +642,15 @@ class NerfNetBoxWithAutoExpo(nn.Module):
 
         self.optim_autoexpo = optim_autoexpo
         if self.optim_autoexpo:
-            assert(img_names is not None)
+            assert (img_names is not None)
             logger.info('Optimizing autoexposure!')
 
             self.img_names = [remap_name(x) for x in img_names]
             logger.info('\n'.join(self.img_names))
-            self.autoexpo_params = nn.ParameterDict(OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
+            self.autoexpo_params = nn.ParameterDict(
+                OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
 
-    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, img_name=None):
+    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only=False, img_name=None):
         '''
         :param ray_o, ray_d: [..., 3]
         :param fg_z_max: [...,]
@@ -712,13 +658,13 @@ class NerfNetBoxWithAutoExpo(nn.Module):
         :param box_loc: [..., 3]
         :return
         '''
-        ret = self.nerf_net(ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc)
+        ret = self.nerf_net(ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only)
 
         if img_name is not None:
             img_name = remap_name(img_name)
         if self.optim_autoexpo and (img_name in self.autoexpo_params):
             autoexpo = self.autoexpo_params[img_name]
-            scale = torch.abs(autoexpo[0]) + 0.5 # make sure scale is always positive
+            scale = torch.abs(autoexpo[0]) + 0.5  # make sure scale is always positive
             shift = autoexpo[1]
             ret['autoexpo'] = (scale, shift)
 

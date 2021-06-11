@@ -45,6 +45,9 @@ def normalize(x):
 
     return (x - min) / ((max - min) + TINY_NUMBER)
 
+def normalize_torch(x):
+    return x
+
 
 to8b = lambda x: (255 * np.clip(x, 0, 1)).astype(np.uint8)
 # gray2rgb = lambda x: np.tile(x[:,:,np.newaxis], (1, 1, 3))
