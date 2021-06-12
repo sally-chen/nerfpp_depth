@@ -220,9 +220,9 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       mask_path=mask_files[i],
                                                       min_depth_path=mindepth_files[i],
                                                       max_depth=max_depth, box_loc=loc,
-                                                      depth_path=depth_files[i]),
-                                                    make_class_label=False)
-                                                      # max_depth=max_depth, box_loc=locs[i]))
+                                                      depth_path=depth_files[i],
+                                                    make_class_label=False))
+
         else:
             ray_samplers.append(RaySamplerSingleImage(H=360, W=640, intrinsics=intrinsics, c2w=pose,
                                                       img_path=img_files[i],
@@ -242,9 +242,9 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     #     dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
     #     locs = np.stack(locs, axis=0)
     #     dummy_pose_loc[:,:3, 3] = locs
-    #     plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
+    #     plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses {} nerf ++'.format(split),
     #                    ['scene poses','box'])
-    # #
+    #
     #
     # ## denorm first and save for test ##
     #

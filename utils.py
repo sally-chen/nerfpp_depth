@@ -2,6 +2,7 @@ import torch
 # import torch.nn as nn
 # import torch.nn.functional as F
 import numpy as np
+from icecream import ic
 
 
 HUGE_NUMBER = 1e10
@@ -10,18 +11,50 @@ TINY_NUMBER = 1e-6      # float32 only has 7 decimal digits precision
 
 # misc utils
 def entropy_loss(p):
-    sm = torch.nn.Softmax(dim=1)
-    lsm = torch.nn.LogSoftmax(dim=1)
+
+
+    sm = torch.nn.Softmax(dim=-1)
+    lsm = torch.nn.LogSoftmax(dim=-1)
 
     sm_res = sm(p)
     lsm_res = lsm(p)
 
+    # if p.shape[0] >1024:
+    #     p_ = np.reshape(p.detach().cpu().numpy(),(360,640, 128))
+    #     sm_res_ = np.reshape(sm_res.detach().cpu().numpy(),(360,640, 128))
+    #     lsm_res_ = np.reshape(lsm_res.detach().cpu().numpy(),(360,640, 128))
+
+
     # print('[!!]P: {} LOG: {}'.format(sm_res, lsm_res))
 
-    return torch.mean(torch.sum(-1.0 * sm_res * lsm_res, dim=1))
+    return torch.mean(torch.sum(-1.0 * sm_res * lsm_res, dim=-1))
 
-    # log_term = torch.clamp(torch.log2(p), min=-100., max=0.)
-    # return torch.mean(torch.sum(-1.0 * p * log_term, dim=1))
+    ### gives nans
+    # p_plus = torch.sigmoid(p)
+    # p_normalize = p_plus / torch.sum(p_plus, dim=1, keepdim=True)
+    # log_term = torch.clamp(torch.log2(p_normalize), min=-100., max=0.)
+    # return torch.mean(torch.sum(-1.0 * p_normalize * log_term, dim=1))
+# def entropy_loss(p):
+#     ic(p)
+#     p_normalize = torch.tanh(p)+1.
+#
+#     ic(p_normalize)
+#
+#     log_term = torch.clamp(torch.log2(p_normalize), min=-100., max=0.)
+#     return torch.mean(torch.sum(-1.0 * p_normalize * log_term, dim=-1))
+
+def crossEntropy(label, pred):
+
+    sm = torch.nn.Softmax(dim=-1)
+    lsm = torch.nn.LogSoftmax(dim=-1)
+
+    sm_res = sm(label)
+    lsm_res = lsm(pred)
+
+    # print('[!!]P: {} LOG: {}'.format(sm_res, lsm_res))
+
+    return torch.mean(torch.sum(-1.0 * sm_res * lsm_res, dim=-1))
+
 
 def img2mse(x, y, mask=None):
     if mask is None:
@@ -44,6 +77,15 @@ def normalize(x):
     max = x.max()
 
     return (x - min) / ((max - min) + TINY_NUMBER)
+
+def normalize_torch(x):
+    #min,_ = torch.min(x,dim=-1,keepdim=True)
+    #max,_ = torch.max(x,dim=-1,keepdim=True)
+
+    #return (x - min) / ((max - min) + TINY_NUMBER)
+    x_minus = x - x.min(dim=-1, keepdim=True)[0]
+    x_norm = x_minus / (x_minus.max(dim=-1, keepdim=True)[0] + TINY_NUMBER)
+    return x_norm
 
 
 to8b = lambda x: (255 * np.clip(x, 0, 1)).astype(np.uint8)
