@@ -103,8 +103,7 @@ class MLPNetClassier(nn.Module):
         self.base_layers = nn.ModuleList(self.base_layers)
         # self.base_layers.apply(weights_init)        # xavier init
 
-        base_remap_layers = [nn.Linear(dim, self.out_dim), nn.Sigmoid()]
-        # base_remap_layers = [nn.Sigmoid(),]
+        base_remap_layers = [nn.Linear(dim, self.out_dim), ]
         self.base_remap_layers = nn.Sequential(*base_remap_layers)
         # self.base_remap_layers.apply(weights_init)
 
@@ -123,17 +122,6 @@ class MLPNetClassier(nn.Module):
             if i in self.skips:
                 base = torch.cat((input_pts_skip, base), dim=-1)
             base = self.base_layers[i + 1](base)
-
-        # print("----------")
-        #
-        # print(base)
-        #
-        # for lay in self.base_remap_layers:
-        #     base = lay(base)
-        #     print(base)
-        #
-        # occ_likeli = base
-
 
         occ_likeli = self.base_remap_layers(base)
 
