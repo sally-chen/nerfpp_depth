@@ -575,7 +575,7 @@ def ddp_train_nerf(rank, args):
 
     loss_bce = torch.nn.BCEWithLogitsLoss()
 
-    loss_type = 'ce'
+    loss_type = 'bce'
     add_entropy = True
 
     # with torch.autograd.detect_anomaly():
@@ -687,7 +687,7 @@ def ddp_train_nerf(rank, args):
 
             if args.fg_bg_net:
                 if add_entropy:
-                    loss_cls = (loss_fg + loss_bg) + 0.1 * (loss_entr_fg+loss_entr_bg)
+                    loss_cls = (loss_fg + loss_bg) + 0.0001 * (loss_entr_fg+loss_entr_bg)
                 else:
                     loss_cls = loss_fg + loss_bg
 
