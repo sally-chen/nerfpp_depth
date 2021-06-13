@@ -1,7 +1,7 @@
 ### INPUT
 datadir = /media/diskstation/sally/
-scene = big_inters_nom15_samp4x4_antarc
-expname = box_test2
+scene = big_inters_nom15_samp4x4_nobox
+expname = ce0.1entr
 
 basedir = ./logs
 config = None
@@ -11,7 +11,7 @@ testskip = 1
 
 ### TRAINING
 N_iters = 1000001
-N_rand = 1024
+N_rand = 4096
 lrate = 0.0001
 lrate_decay_factor = 0.1
 lrate_decay_steps = 5000
@@ -37,12 +37,12 @@ i_print = 50
 i_weights = 5000
 
 
-have_box = True
+have_box = False
 train_box_only = False
 depth_training = False
-donerf_pretrain = False
+donerf_pretrain = True
 
-front_sample = 192
+front_sample = 128
 back_sample = 128
 
 fg_bg_net = True

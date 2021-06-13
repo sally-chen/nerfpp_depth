@@ -231,38 +231,36 @@ def render_single_image(rank, world_size, models, ray_sampler, chunk_size, \
                         box_weights = box_ret['fg_box_sig']
                         fg_weights = fg_weights + normalize_torch(box_weights[:, 1:])
 
-                fg_weights[fg_depth_mid[:,:-1]<0.] =0.
+                # fg_weights[fg_depth_mid[:,:-1]<0.] =0.
                 fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights,
                                       N_samples=N_samples, det=False))  # [..., N_samples]
-                fg_depth[fg_depth<0.] = 0.
+                # fg_depth[fg_depth<0.] = 0.
+
+
+                # sample pdf and concat with earlier samples
+                # bg_weights = ret['bg_weights'].clone().detach()
+                # bg_depth_mid = .5 * (bg_depth[..., 1:] + bg_depth[..., :-1])
+                # bg_weights = bg_weights[..., 1:-1]                              # [..., N_samples-2]
+
+                bg_depth_mid = ray_batch_split['bg_z_vals_centre'][s]
+
+
+                #bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: back_sample-1]
+
+                bg_weights =torch.nn.functional.softmax(ret['likeli_bg'],dim=-1)[:, 1: back_sample-1]
+                # bg_weights[bg_depth_mid[:,:-1]<0.] =0.
+                bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
+                                      N_samples=N_samples, det=False))  # [..., N_samples]
+                # bg_depth[bg_depth<0.] = 0.
+
+                # delete unused memory
+                del fg_weights
+                del fg_depth_mid
+
 
                 if not train_box_only:
-                    # sample pdf and concat with earlier samples
-                    # bg_weights = ret['bg_weights'].clone().detach()
-                    # bg_depth_mid = .5 * (bg_depth[..., 1:] + bg_depth[..., :-1])
-                    # bg_weights = bg_weights[..., 1:-1]                              # [..., N_samples-2]
-
-                    bg_depth_mid = ray_batch_split['bg_z_vals_centre'][s]
-
-
-                    #bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: back_sample-1]
-                    
-                    bg_weights =torch.nn.functional.softmax(ret['likeli_bg'],dim=-1)[:, 1: back_sample-1]
-                    bg_weights[bg_depth_mid[:,:-1]<0.] =0.
-                    bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
-                                          N_samples=N_samples, det=False))  # [..., N_samples]
-                    bg_depth[bg_depth<0.] = 0.
-
-                    # delete unused memory
-                    del fg_weights
-                    del fg_depth_mid
-
-
-                    if not train_box_only:
-                        del bg_weights
-                        del bg_depth_mid
-
-                    torch.cuda.empty_cache()
+                    del bg_weights
+                    del bg_depth_mid
 
 
                 #print_gpu()
@@ -457,13 +455,13 @@ def create_nerf(rank, args):
                  models[name].load_state_dict(to_load[name])
         ####################################################################################333
          #### tmp for reloading pretrained model
-        fpath_sc = "./logs/pretrained/scene/model_425000.pth"
-        to_load_sc = torch.load(fpath_sc, map_location=map_location)
-
-        for k in to_load_sc['net_0'].keys():
-              to_load['net_0'][k] = to_load_sc['net_1'][k]
-
-        models['net_0'].load_state_dict(to_load['net_0'])
+        # fpath_sc = "./logs/pretrained/scene/model_425000.pth"
+        # to_load_sc = torch.load(fpath_sc, map_location=map_location)
+        #
+        # for k in to_load_sc['net_0'].keys():
+        #       to_load['net_0'][k] = to_load_sc['net_1'][k]
+        #
+        # models['net_0'].load_state_dict(to_load['net_0'])
 
 
     elif args.have_box:
@@ -532,16 +530,6 @@ def ddp_train_nerf(rank, args):
     logger = logging.getLogger(__package__)
     setup_logger()
 
-    ###### decide chunk size according to gpu memory
-    # logger.info('gpu_mem: {}'.format(torch.cuda.get_device_properties(rank).total_memory))
-    # if torch.cuda.get_device_properties(rank).total_memory / 1e9 > 14:
-    #     logger.info('setting batch size according to 24G gpu')
-    #     args.N_rand = 1024
-    #     args.chunk_size = 10240
-    # else:
-    #     logger.info('setting batch size according to 12G gpu')
-    #     args.N_rand = 1024
-    #     args.chunk_size = 10240
 
     ###### Create log dir and copy the config file
     if rank == 0:
@@ -696,18 +684,10 @@ def ddp_train_nerf(rank, args):
                 print('[TIME] get entr loss {}'.format(cur_time_sp))
                 cur_time = time.time()
 
-            #
-            # metrics_fg = calculate_metrics(np.array(ret['likeli_fg'].cpu().detach().numpy()), np.array(label_fg.cpu().detach().numpy()),'micro')
-            # metrics_bg = calculate_metrics(np.array(ret['likeli_bg'].cpu().detach().numpy()), np.array(label_bg.cpu().detach().numpy()),'micro')
-            # for k in metrics_fg:
-            #     scalars_to_log[k+'_fg'] = metrics_fg[k]
-            #
-            # for k in metrics_bg:
-            #     scalars_to_log[k+'_bg'] = metrics_bg[k]
 
             if args.fg_bg_net:
                 if add_entropy:
-                    loss_cls = (loss_fg + loss_bg) + 0.01 * (loss_entr_fg+loss_entr_bg)
+                    loss_cls = (loss_fg + loss_bg) + 0.1 * (loss_entr_fg+loss_entr_bg)
                 else:
                     loss_cls = loss_fg + loss_bg
 
@@ -717,8 +697,6 @@ def ddp_train_nerf(rank, args):
 
             loss_cls.backward()
             optim_oracle.step()
-
-            scalars_to_log['loss'] = loss_cls.item()
 
             if time_program:
                 cur_time_sp = time.time() - cur_time
@@ -759,12 +737,6 @@ def ddp_train_nerf(rank, args):
 
                 fg_depth_mid = ray_batch['fg_z_vals_centre']
 
-
-
-
-
-                # fg_depth_mid = torch.cat([torch.zeros_like(fg_depth_mid[..., 0:1]), fg_depth_mid], dim=-1)
-
                 #fg_weights = torch.sigmoid(ret['likeli_fg'])[:, 2:args.front_sample].clone().detach()
                 fg_weights = torch.nn.functional.softmax(ret['likeli_fg'],dim=-1)[:, 2:args.front_sample].clone().detach()
 
@@ -776,28 +748,20 @@ def ddp_train_nerf(rank, args):
                         box_weights = ret_box['fg_box_sig']
                         fg_weights = fg_weights + normalize_torch(box_weights[:,1:])
 
-                fg_weights[fg_depth_mid[:,:-1]<0.] = 0.
-
+                # fg_weights[fg_depth_mid[:,:-1]<0.] = 0.
                 fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights,
                                               N_samples=N_samples, det=False))    # [..., N_samples]
-                fg_depth[fg_depth<0.] = 0.
+                # fg_depth[fg_depth<0.] = 0.
 
-
-
-                # sample pdf and concat with earlier samples
-                # bg_weights = ret['bg_weights'].clone().detach()
-                # bg_depth_mid = .5 * (bg_depth[..., 1:] + bg_depth[..., :-1])
-                # bg_weights = bg_weights[..., 1:-1]                              # [..., N_samples-2]
 
                 bg_depth_mid = ray_batch['bg_z_vals_centre']
                 #bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach()
                 bg_weights = torch.nn.functional.softmax(ret['likeli_bg'],dim=-1)[:, 1: args.back_sample-1].clone().detach()
-                bg_weights[bg_depth_mid[:,:-1]<0.] =0.
 
+                # bg_weights[bg_depth_mid[:,:-1]<0.] =0.
                 bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                                               N_samples=N_samples, det=False))    # [..., N_samples]
-
-                bg_depth[bg_depth<0.] = 0.
+                # bg_depth[bg_depth<0.] = 0.
 
 
 
@@ -809,7 +773,6 @@ def ddp_train_nerf(rank, args):
                 else:
                     ret = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth,
                               img_name=ray_batch['img_name'])
-                #writer.add_graph(net, [ray_batch['ray_o'], ray_batch['ray_d'], fg_far_depth, fg_depth, bg_depth, ray_batch['box_loc']])
 
                 all_rets.append(ret)
 
@@ -842,10 +805,6 @@ def ddp_train_nerf(rank, args):
                 # print('before step')
                 optim.step()
 
-                #writer.add_graph(net, [ray_batch['ray_o'], ray_batch['ray_d'], fg_far_depth, fg_depth, bg_depth, ray_batch['box_loc']])
-
-                # # clean unused memory
-                # torch.cuda.empty_cache()
 
 
         ### end of core optimization loop
@@ -857,6 +816,7 @@ def ddp_train_nerf(rank, args):
             # print('=======likeli=====')
             # print(out_likeli_fg)
             # print(out_likeli_bg)
+            scalars_to_log['loss'] = loss_cls.item()
             logstr = '{} step: {} '.format(args.expname, global_step)
             for k in scalars_to_log:
                 logstr += ' {}: {:.6f}'.format(k, scalars_to_log[k])
@@ -930,7 +890,7 @@ def ddp_train_nerf(rank, args):
 
                     if args.fg_bg_net:
                         if add_entropy:
-                            loss_cls = (loss_fg + loss_bg) + 0.01 * ( loss_entr_fg + loss_entr_bg)
+                            loss_cls = (loss_fg + loss_bg) + 0.1 * ( loss_entr_fg + loss_entr_bg)
                             del loss_entr_fg
                             del loss_entr_bg
 
@@ -977,10 +937,10 @@ def ddp_train_nerf(rank, args):
                     visualize_depth_label(writer, np.array(label_fg.cpu().detach().numpy())[select_inds], out_likeli_fg[select_inds], global_step, 'val/dVis_fg')
                     visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds], out_likeli_bg[select_inds], global_step, 'val/dVis_bg')
 
-                    loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
-                                   out_likeli_fg[select_inds], global_step, 'val/LossVis_fg')
-                    loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
-                                   out_likeli_bg[select_inds], global_step, 'val/LossVis_bg')
+                    # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
+                    #                out_likeli_fg[select_inds], global_step, 'val/LossVis_fg')
+                    # loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
+                    #                out_likeli_bg[select_inds], global_step, 'val/LossVis_bg')
 
 
                     logstr = '[=VALIDATION=] {} step: {} '.format(args.expname, global_step)
@@ -1062,7 +1022,7 @@ def ddp_train_nerf(rank, args):
 
                     if args.fg_bg_net:
                         if add_entropy:
-                            loss_cls = (loss_fg + loss_bg) + 0.01 * (loss_entr_fg + loss_entr_bg)
+                            loss_cls = (loss_fg + loss_bg) + 0.1 * (loss_entr_fg + loss_entr_bg)
                             del loss_entr_fg
                             del loss_entr_bg
                         else:
@@ -1106,11 +1066,11 @@ def ddp_train_nerf(rank, args):
                                           out_likeli_fg[select_inds], global_step, 'train/dVis_fg')
                     visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
                                           out_likeli_bg[select_inds], global_step, 'train/dVis_bg')
-
-                    loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
-                                          out_likeli_fg[select_inds], global_step, 'train/LossVis_fg')
-                    loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
-                                          out_likeli_bg[select_inds], global_step, 'train/LossVis_bg')
+                    #
+                    # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
+                    #                       out_likeli_fg[select_inds], global_step, 'train/LossVis_fg')
+                    # loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
+                    #                       out_likeli_bg[select_inds], global_step, 'train/LossVis_bg')
 
 
                     logstr = '[=VALID_TRAIN] {} step: {} '.format(args.expname, global_step)
@@ -1134,28 +1094,6 @@ def ddp_train_nerf(rank, args):
                                    gt_img=ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
                                    train_box_only=args.train_box_only, prefix='train/')
                     del log_data
-            # time0 = time.time()
-            # idx = what_train_to_log % len(ray_samplers)
-            # log_data, label = render_single_image(rank, args.world_size, models, ray_samplers[idx], \
-            #                                args.chunk_size, args.train_box_only, have_box=args.have_box, \
-            #                                donerf_pretrain=args.donerf_pretrain)
-            # what_train_to_log += 1
-            # dt = time.time() - time0
-            # if rank == 0:   # only main process should do this
-            #
-            #     if args.donerf_pretrain:
-            #         loss_cls = loss_bce(log_data[0]['likeli'].detach().cpu(), torch.reshape(label, (360, 640, 256)).detach().cpu())
-            #         scalars_to_log['bce_loss'] = loss_cls.item()
-            #         metrics = calculate_metrics(np.array(ret['likeli'].detach().cpu().numpy()),
-            #                                     np.array(ray_batch['cls_label'].cpu().numpy()), 'micro')
-            #         for k in metrics:
-            #             scalars_to_log[k] = metrics[k]
-            #         writer.add_scalar(k, scalars_to_log[k], global_step)
-            #     else:
-            #         logger.info('Logged a random training view in {} seconds'.format(dt))
-            #         log_view_to_tb(writer, global_step, log_data, gt_img=ray_samplers[idx].get_img(), \
-            #                        gt_depth=ray_samplers[idx].get_depth(), mask=None, have_box=args.have_box, \
-            #                        train_box_only=args.train_box_only, prefix='train/')
 
 
             torch.cuda.empty_cache()

@@ -185,11 +185,21 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     # if cam_cnt > 20:
     #     cam_cnt = 20
     ## tmp ##
+
+    max = np.array([100., 140.])
+    min = np.array([85., 125.])
+    avg_pose = np.array([0.5, 0.5])
+
+
     for i in range(cam_cnt):
 
         print(i)
         intrinsics = parse_txt(intrinsics_files[i])
         pose = parse_txt(pose_files[i])
+
+        p = (pose[:2, 3] / 0.5 + avg_pose) * (max - min) + min
+        if (p[0] > 95. and p[1] > 138) or (p[0] > 95. and p[1] < 125):
+            continue
 
         ################## rand ##############33
         #pose[:2,3] = pose[:2,3] * 0.5
