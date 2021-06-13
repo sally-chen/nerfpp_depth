@@ -238,10 +238,10 @@ class RaySamplerSingleImage(object):
                     ret[k] = torch.from_numpy(ret[k])
         return ret
 
-    def get_all_classifier(self, N_front_sample, N_back_sample, pretrain, center_crop=False, ):
+    def get_all_classifier(self, N_front_sample, N_back_sample, pretrain, rank ):
 
         axis_filtered_depth_flat, fg_pts_flat, bg_pts_flat, bg_z_vals_centre, fg_z_vals_centre = \
-            self.get_classifier_label_torch(N_front_sample, N_back_sample, pretrain=pretrain)
+            self.get_classifier_label_torch(N_front_sample, N_back_sample, pretrain=pretrain, rank=rank)
 
         if pretrain:
             cls_label_filtered = axis_filtered_depth_flat
@@ -280,11 +280,11 @@ class RaySamplerSingleImage(object):
         for k in ret:
 
             if ret[k] is not None and isinstance(ret[k], np.ndarray):
-                ret[k] = torch.from_numpy(ret[k])
+                ret[k] = torch.from_numpy(ret[k]).to(rank)
 
         return ret
 
-    def get_classifier_label_torch(self, N_front_sample, N_back_sample, pretrain, select_inds=None,save=False):
+    def get_classifier_label_torch(self, N_front_sample, N_back_sample, pretrain, select_inds=None,save=False, rank=0):
         import time
         time_program = False
         if time_program:
@@ -292,15 +292,15 @@ class RaySamplerSingleImage(object):
 
         N_rays = self.H * self.W
 
-        device = 'cuda:0'
-
-        depth_sphere = torch.from_numpy(self.depth_sphere).to(device)
-        rays_o = torch.from_numpy(self.rays_o).to(device)
-        rays_d = torch.from_numpy(self.rays_d).to(device)
-        depth_map = torch.from_numpy(self.depth_map).to(device)
 
 
-        fg_far_depth = depth_sphere.to(device)  # how far is the sphere to rayo [ H*W,]
+        depth_sphere = torch.from_numpy(self.depth_sphere).to(rank)
+        rays_o = torch.from_numpy(self.rays_o).to(rank)
+        rays_d = torch.from_numpy(self.rays_d).to(rank)
+        depth_map = torch.from_numpy(self.depth_map).to(rank)
+
+
+        fg_far_depth = depth_sphere.to(rank)  # how far is the sphere to rayo [ H*W,]
 
         same_seg = False
 
@@ -308,7 +308,7 @@ class RaySamplerSingleImage(object):
             fg_near_depth = fg_far_depth - 2.  # [H*W,]
         else:
 
-            fg_near_depth =  torch.from_numpy(1e-4 * np.ones_like(self.rays_d[..., 0])).to(device)
+            fg_near_depth =  torch.from_numpy(1e-4 * np.ones_like(self.rays_d[..., 0])).to(rank)
 
 
         step = (fg_far_depth - fg_near_depth) / (
@@ -323,7 +323,7 @@ class RaySamplerSingleImage(object):
         # slice till last sample as wel are taking the mid points
         # fg_pts = rays_o.unsqueeze(-2) + fg_z_vals_centre.unsqueeze(-1) * rays_d.unsqueeze(-2)  # [H*W, N_samples, 3]
 
-        bg_z_vals = torch.linspace(0., 1., N_back_sample).to(device)
+        bg_z_vals = torch.linspace(0., 1., N_back_sample).to(rank)
         step = bg_z_vals[1] - bg_z_vals[0]
 
         bg_z_vals_centre = bg_z_vals[:-1] + step / 2.
@@ -333,24 +333,7 @@ class RaySamplerSingleImage(object):
         bg_z_vals_centre = bg_z_vals_centre.view(
             [1, ]  + [N_back_sample - 1, ]).expand([N_rays] + [N_back_sample - 1, ])  # [H*W, N_samples]
 
-        _, bg_depth_real = depth2pts_outside(
-            rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),
-            rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),
-            bg_z_vals)  # [H*W, N_samples, 4],  # [H*W, N_samples]
-        # bg_pts, _ = depth2pts_outside(\
-        #     rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample-1, 3]), rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample-1, 3]),bg_z_vals_centre)  # [H*W, N_samples, 4],  # [H*W, N_samples]
 
-        # flip left and right
-        # bg_pts, bg_depth_real = torch.flip(bg_pts, dims=[1,]), torch.fliplr(bg_depth_real)
-        bg_depth_real = torch.fliplr(bg_depth_real)
-
-        # if pretrain:
-        bg_depth_real[:, 0] = fg_z_vals[:, -1]  # there can be potential mismatches
-
-        # they are both distance to camera
-        depth_segs = torch.cat([fg_z_vals, bg_depth_real], dim=-1)  # [H*W, numseg]
-
-        seg_ind = torch.searchsorted(depth_segs, depth_map.unsqueeze(-1))
 
 
         if time_program:
@@ -363,6 +346,25 @@ class RaySamplerSingleImage(object):
 
         if pretrain and save:
 
+            _, bg_depth_real = depth2pts_outside(
+                rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),
+                rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),
+                bg_z_vals)  # [H*W, N_samples, 4],  # [H*W, N_samples]
+            # bg_pts, _ = depth2pts_outside(\
+            #     rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample-1, 3]), rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample-1, 3]),bg_z_vals_centre)  # [H*W, N_samples, 4],  # [H*W, N_samples]
+
+            # flip left and right
+            # bg_pts, bg_depth_real = torch.flip(bg_pts, dims=[1,]), torch.fliplr(bg_depth_real)
+            bg_depth_real = torch.fliplr(bg_depth_real)
+
+            # if pretrain:
+            bg_depth_real[:, 0] = fg_z_vals[:, -1]  # there can be potential mismatches
+
+            # they are both distance to camera
+            depth_segs = torch.cat([fg_z_vals, bg_depth_real], dim=-1)  # [H*W, numseg]
+
+            seg_ind = torch.searchsorted(depth_segs, depth_map.unsqueeze(-1))
+
 
 
             if time_program:
@@ -370,8 +372,8 @@ class RaySamplerSingleImage(object):
                 print('[TIME] searchsort {}'.format(cur_time_sp))
                 cur_time = time.time()
 
-            x_range = torch.arange(self.W).to(device)
-            y_range = torch.arange(self.H).to(device)
+            x_range = torch.arange(self.W).to(rank)
+            y_range = torch.arange(self.H).to(rank)
 
             y,x = torch.meshgrid(y_range,x_range)
 
@@ -385,13 +387,13 @@ class RaySamplerSingleImage(object):
                                [0.20943058, 0.5       , 0.64644661, 0.5       , 0.20943058],\
                                [0.29289322, 0.64644661, 1.        , 0.64644661, 0.29289322],\
                                [0.20943058, 0.5       , 0.64644661, 0.5       , 0.20943058],\
-                               [0.        , 0.20943058, 0.29289322, 0.20943058, 0.        ]])).to(device).float()
+                               [0.        , 0.20943058, 0.29289322, 0.20943058, 0.        ]])).to(rank).float()
 
             sort_ind = torch.from_numpy(np.array([[5,4,3,4,5],\
                                       [4,2,1,2,4],\
                                       [3,1,0,1,3],\
                                       [4,2,1,2,4],\
-                                      [5,4,3,4,5]])).to(device)
+                                      [5,4,3,4,5]])).to(rank)
             ind_list = []
 
             for i in range(-2,3):
@@ -403,7 +405,7 @@ class RaySamplerSingleImage(object):
                 ind_list.append(tmp)
 
         # ind out of bound -1,-1 ?
-            cls_label = torch.zeros((self.H , self.W, depth_segs.shape[1],6)).to(device)
+            cls_label = torch.zeros((self.H , self.W, depth_segs.shape[1],6)).to(rank)
 
 
             ct = 0
@@ -429,7 +431,7 @@ class RaySamplerSingleImage(object):
 
 
             # weight – filters of shape (out_channels,groups/in_channels, KW)
-            tri_filter = torch.Tensor([[0.33333, 0.666666, 1, 0.666666, 0.33333]]).unsqueeze(0).to(device)
+            tri_filter = torch.Tensor([[0.33333, 0.666666, 1, 0.666666, 0.33333]]).unsqueeze(0).to(rank)
             cls_label_flat = maxs.view(self.H * self.W, depth_segs.shape[1])  # [H* W, numseg]
 
             # test15 = cls_label_flat.detach().cpu().numpy()
@@ -447,6 +449,8 @@ class RaySamplerSingleImage(object):
             zarr.save(self.label_path+'.zarr', cls_label_flat_filtered.detach().cpu().numpy())
             # np.savez_compressed(self.label_path, cls_label_flat_filtered.detach().cpu().numpy())
             # np.savez(self.label_path, cls_label_flat_filtered.detach().cpu().numpy())
+
+            return
 
 
         elif pretrain is False:
@@ -485,13 +489,13 @@ class RaySamplerSingleImage(object):
 
 
 
-    def random_sample_classifier(self,N_rand, N_front_sample, N_back_sample,pretrain,center_crop=False):
-        ## can precompute before where each ray intersect sphere
+    def random_sample_classifier(self,N_rand, N_front_sample, N_back_sample,pretrain,rank):
+
 
         select_inds = np.random.choice(self.H * self.W, size=(N_rand,), replace=False)
         with torch.no_grad():
             axis_filtered_depth_flat, fg_pts_flat, bg_pts_flat, bg_z_vals_centre, fg_z_vals_centre = \
-               self.get_classifier_label_torch( N_front_sample, N_back_sample, pretrain, select_inds=select_inds)
+               self.get_classifier_label_torch( N_front_sample, N_back_sample, pretrain, select_inds=select_inds, rank=rank)
 
 
 
