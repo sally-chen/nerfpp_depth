@@ -1006,8 +1006,8 @@ def ddp_train_nerf(rank, args):
                 label_bg = label[:, args.front_sample:]
 
                 if loss_type == 'bce':
-                    loss_fg = loss_bce(pred_fg[select_inds],  label_fg[select_inds])
-                    loss_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds])
+                    loss_fg = loss_bce(pred_fg[select_inds],  label_fg[select_inds].cpu())
+                    loss_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds].cpu())
                     scalars_to_log['val/bce_loss_fg'] = loss_fg.item()
                     scalars_to_log['val/bce_loss_bg'] = loss_bg.item()
 
@@ -1127,8 +1127,8 @@ def ddp_train_nerf(rank, args):
                 label_bg = label[:, args.front_sample:]
 
                 if loss_type == 'bce':
-                    loss_fg = loss_bce(pred_fg[select_inds], label_fg[select_inds])
-                    loss_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds])
+                    loss_fg = loss_bce(pred_fg[select_inds], label_fg[select_inds].cpu())
+                    loss_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds].cpu())
                     scalars_to_log['train/bce_loss_fg'] = loss_fg.item()
                     scalars_to_log['train/bce_loss_bg'] = loss_bg.item()
 
@@ -1153,8 +1153,8 @@ def ddp_train_nerf(rank, args):
                     loss_bg = loss_b_bg + loss_c_bg
 
                 if add_entropy:
-                    loss_entr_fg = entropy_loss(pred_fg[select_inds])
-                    loss_entr_bg = entropy_loss(pred_bg[select_inds])
+                    loss_entr_fg = entropy_loss(pred_fg[select_inds].cpu())
+                    loss_entr_bg = entropy_loss(pred_bg[select_inds].cpu())
                     scalars_to_log['train/entr_loss_fg'] = loss_entr_fg.item()
                     scalars_to_log['train/entr_loss_bg'] = loss_entr_bg.item()
 
