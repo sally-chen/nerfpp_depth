@@ -642,8 +642,8 @@ def ddp_train_nerf(rank, args):
 
 
             if loss_type =='ce':
-                loss_fg = crossEntropy(label_fg, ret['likeli_fg'])
-                loss_bg = crossEntropy(label_bg, ret['likeli_bg'])
+                loss_fg = crossEntropy(label_fg, torch.sigmoid(ret['likeli_fg']))
+                loss_bg = crossEntropy(label_bg, torch.sigmoid(ret['likeli_bg']))
                 scalars_to_log['ce_loss_fg'] = loss_fg.item()
                 scalars_to_log['ce_loss_bg'] = loss_bg.item()
 
@@ -861,8 +861,8 @@ def ddp_train_nerf(rank, args):
                         scalars_to_log['val/bce_loss_bg'] = loss_bg.item()
 
                     elif loss_type == 'ce':
-                        loss_fg = crossEntropy(label_fg.detach().cpu(), pred_fg.detach().cpu())
-                        loss_bg = crossEntropy(label_bg.detach().cpu(), pred_bg.detach().cpu())
+                        loss_fg = crossEntropy(label_fg.detach().cpu(), torch.sigmoid(pred_fg.detach().cpu()))
+                        loss_bg = crossEntropy(label_bg.detach().cpu(), torch.sigmoid(pred_bg.detach().cpu()))
                         scalars_to_log['val/ce_loss_fg'] = loss_fg.item()
                         scalars_to_log['val/ce_loss_bg'] = loss_bg.item()
 
@@ -995,8 +995,8 @@ def ddp_train_nerf(rank, args):
                         scalars_to_log['train/bce_loss_bg'] = loss_bg.item()
 
                     elif loss_type == 'ce':
-                        loss_fg = crossEntropy(label_fg.detach().cpu(), pred_fg.detach().cpu())
-                        loss_bg = crossEntropy(label_bg.detach().cpu(), pred_bg.detach().cpu())
+                        loss_fg = crossEntropy(label_fg.detach().cpu(), torch.sigmoid(pred_fg.detach().cpu()))
+                        loss_bg = crossEntropy(label_bg.detach().cpu(), torch.sigmoid(pred_bg.detach().cpu()))
                         scalars_to_log['train/ce_loss_fg'] = loss_fg.item()
                         scalars_to_log['train/ce_loss_bg'] = loss_bg.item()
 

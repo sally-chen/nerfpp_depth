@@ -190,7 +190,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     min = np.array([85., 125.])
     avg_pose = np.array([0.5, 0.5])
 
-
+    count = 0
     for i in range(cam_cnt):
 
         print(i)
@@ -200,7 +200,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         p = (pose[:2, 3] / 0.5 + avg_pose) * (max - min) + min
         if (p[0] > 95. and p[1] > 138) or (p[0] > 95. and p[1] < 125):
             continue
-
+        count += 1
         ################## rand ##############33
         #pose[:2,3] = pose[:2,3] * 0.5
         ################## rand ##############33
@@ -273,4 +273,5 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     # outfile.close()
 
     print("finished getting rays")
+    print("[Number of image: {}]".format(count))
     return ray_samplers
