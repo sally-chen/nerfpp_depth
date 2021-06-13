@@ -284,74 +284,6 @@ class RaySamplerSingleImage(object):
 
         return ret
 
-    def get_classifier_label(self, N_front_sample, N_back_sample):
-        N_rays = self.H * self.W
-
-        if self.min_depth is None:
-            min_depth = 1e-4 * np.ones_like(self.rays_d[..., 0])
-
-
-        fg_far_depth = self.depth_sphere  # how far is the sphere to rayo [ H*W,]
-
-        same_seg = True
-
-        if same_seg:
-            fg_near_depth = self.depth_sphere - 2.  # [H*W,]
-        else:
-            fg_near_depth = min_depth  # [H*W,]
-        step = (fg_far_depth - fg_near_depth) / (
-                    N_front_sample - 1)  # fg step size  --> will make this constant eventually [H*W]
-
-        fg_z_vals = np.stack([fg_near_depth + i * step for i in range(N_front_sample)],
-                             axis=-1)  # [..., N_samples] distance to camera till unit sphere , depth value
-
-        fg_z_vals_centre = step[..., None] / 2. + fg_z_vals
-
-        # slice till last sample as wel are taking the mid points
-        fg_pts = self.rays_o[..., None, :] + fg_z_vals_centre[:, :-1][..., None] * self.rays_d[..., None,
-                                                                                   :]  # [H*W, N_samples, 3]
-
-        bg_z_val = np.linspace(0., 1., N_back_sample)
-        step = bg_z_val[1] - bg_z_val[0]
-
-        bg_z_vals_centre = bg_z_val[:-1] + step/2.
-
-        bg_z_vals = np.tile(bg_z_val, (N_rays, 1))  # [H*W, N_samples]
-        bg_z_vals_centre = np.tile(bg_z_vals_centre, (N_rays, 1))  # [H*W, N_samples]
-
-        _, bg_depth_real = depth2pts_outside_np(self.rays_o, self.rays_d,
-                                                bg_z_vals)  # [H*W, N_samples, 4],  # [H*W, N_samples]
-        bg_pts, _ = depth2pts_outside_np(self.rays_o, self.rays_d,
-                                         bg_z_vals_centre)  # [H*W, N_samples, 4],  # [H*W, N_samples]
-
-        # flip left and right
-        bg_pts, bg_depth_real = np.fliplr(bg_pts), np.fliplr(bg_depth_real)
-
-        bg_depth_real[:, 0] = fg_z_vals[:, -1]  # there can be potential mismatches
-
-        # they are both distance to camera
-        depth_segs = np.concatenate([fg_z_vals, bg_depth_real], axis=-1)  # [H*W, numseg]
-        points = np.concatenate([np.reshape(fg_pts, (N_rays, -1)), np.reshape(bg_pts, (N_rays, -1))], axis=-1)
-
-        seg_ind = []  # index of bin the depth belongs to, [H*W]
-        for i in range(self.depth_map.shape[0]):
-            seg_ind.append(np.digitize(self.depth_map[i], depth_segs[i]))
-
-        seg_ind = np.array(seg_ind)
-
-        cls_label = np.zeros((self.H * self.W, depth_segs.shape[1]))
-
-        np.put_along_axis(cls_label, seg_ind[:, None], 1., axis=-1)  # [H*W, numseg]
-
-        cls_label = np.reshape(cls_label, (self.H, self.W, depth_segs.shape[1]))  # [H, W, numseg]
-
-        # kernel = np.arra([0.3, 0.65, 1.0, 0.65, 0.3])
-        spat_blur = cv2.GaussianBlur(cls_label, (5, 5), 1.2)
-        axis_filtered_depth = gaussian_filter1d(spat_blur, 0.5)  # [H, W, numseg]
-        axis_filtered_depth_flat = np.reshape(axis_filtered_depth, (self.H * self.W, depth_segs.shape[1]))
-
-        return axis_filtered_depth_flat, points, bg_z_vals_centre, fg_z_vals_centre
-
     def get_classifier_label_torch(self, N_front_sample, N_back_sample, pretrain, select_inds=None,save=False):
         import time
         time_program = False
@@ -359,9 +291,6 @@ class RaySamplerSingleImage(object):
             cur_time = time.time()
 
         N_rays = self.H * self.W
-
-
-
 
         device = 'cuda:0'
 
@@ -373,15 +302,13 @@ class RaySamplerSingleImage(object):
 
         fg_far_depth = depth_sphere.to(device)  # how far is the sphere to rayo [ H*W,]
 
-        same_seg = True
+        same_seg = False
 
         if same_seg:
             fg_near_depth = fg_far_depth - 2.  # [H*W,]
         else:
 
             fg_near_depth =  torch.from_numpy(1e-4 * np.ones_like(self.rays_d[..., 0])).to(device)
-
-
 
 
         step = (fg_far_depth - fg_near_depth) / (
@@ -406,7 +333,7 @@ class RaySamplerSingleImage(object):
         bg_z_vals_centre = bg_z_vals_centre.view(
             [1, ]  + [N_back_sample - 1, ]).expand([N_rays] + [N_back_sample - 1, ])  # [H*W, N_samples]
 
-        _, bg_depth_real = depth2pts_outside( \
+        _, bg_depth_real = depth2pts_outside(
             rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),
             rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),
             bg_z_vals)  # [H*W, N_samples, 4],  # [H*W, N_samples]
@@ -424,13 +351,6 @@ class RaySamplerSingleImage(object):
         depth_segs = torch.cat([fg_z_vals, bg_depth_real], dim=-1)  # [H*W, numseg]
 
         seg_ind = torch.searchsorted(depth_segs, depth_map.unsqueeze(-1))
-
-
-        # add box - ? what if box is behind camera?
-
-
-
-
 
 
         if time_program:
