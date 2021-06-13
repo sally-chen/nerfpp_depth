@@ -182,8 +182,8 @@ def render_single_image(models, ray_sampler, chunk_size,
             depths.append(chunk_ret['depth_fgbg'])
 
     if donerf_pretrain:
-        likeli_fg = torch.cat(likelis_fg).view(ray_sampler.H * ray_sampler.W, -1).squeeze()
-        likeli_bg = torch.cat(likelis_bg).view(ray_sampler.H * ray_sampler.W, -1).squeeze()
+        likeli_fg = torch.cat(likelis_fg).view(ray_sampler.H * ray_sampler.W, -1).squeeze().cpu()
+        likeli_bg = torch.cat(likelis_bg).view(ray_sampler.H * ray_sampler.W, -1).squeeze().cpu()
         rgb = None
         d = None
 
