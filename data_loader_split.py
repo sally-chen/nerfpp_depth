@@ -243,29 +243,29 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
     logger.info('Split {}, # views: {}'.format(split, cam_cnt))
 
-    #
-    # if not have_box:
-    #     plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
-    #                     ['scene poses'])
-    #
-    # else:
-    #     dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
-    #     locs = np.stack(locs, axis=0)
-    #     dummy_pose_loc[:,:3, 3] = locs
-    #     plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses {} nerf ++'.format(split),
-    #                    ['scene poses','box'])
-    #
-    #
-    # ## denorm first and save for test ##
-    #
-    # max = np.array([100., 140.])
-    # min = np.array([85., 125.])
-    # avg_pose = np.array([0.5, 0.5])
-    #
-    # for i, p in enumerate(poses):
-    #     poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
-    #     locs[i][:2] = (locs[i][:2] / 0.5 + avg_pose) * (max - min) + min
-    #
+
+    if not have_box:
+        plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
+                        ['scene poses'])
+
+    else:
+        dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
+        locs = np.stack(locs, axis=0)
+        dummy_pose_loc[:,:3, 3] = locs
+        plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses {} nerf ++'.format(split),
+                       ['scene poses','box'])
+
+
+    ## denorm first and save for test ##
+
+    max = np.array([100., 140.])
+    min = np.array([85., 125.])
+    avg_pose = np.array([0.5, 0.5])
+
+    for i, p in enumerate(poses):
+        poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
+        locs[i][:2] = (locs[i][:2] / 0.5 + avg_pose) * (max - min) + min
+
     #
     # filename = split_dir + '/sample_arrs'
     # outfile = open(filename, 'wb')
