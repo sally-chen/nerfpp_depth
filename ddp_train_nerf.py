@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 import torch.optim
 import torch.distributed
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -8,6 +9,8 @@ import os
 from collections import OrderedDict
 from ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
     NerfNetBoxOnlyWithAutoExpo, DepthOracle
+
+from nerf_network import WrapperModule
 
 import time
 from data_loader_split import load_data_split
@@ -124,8 +127,175 @@ def sample_pdf(bins, weights, N_samples, det=False):
     return samples
 
 
+def render_single_image(models, ray_sampler, chunk_size,
+                        train_box_only=False, have_box=False,
+                        donerf_pretrain=False, front_sample=128, back_sample=128,
+                        fg_bg_net=True, use_zval=True,rank=0):
+    """
+    Render an image using the NERF.
+    :param models: Dictionary of networks used for the render.
+    :param ray_sampler: A sampler for the image.
+    :param chunk_size: How many rays per single pass.
+    :param train_box_only: Only trains the foreground.
+    :param have_box: If there exists a box in the rays dictionary.
+    :param donerf_pretrain: ??
+    :param front_sample: Foreground samples.
+    :param back_sample: Background samples.
+    :param fg_bg_net: ??
+    :param use_zval: ??
+    :return: Result dictionary from the last model in the chain of models.
+    """
 
-def render_single_image(rank, world_size, models, ray_sampler, chunk_size, \
+    rays = ray_sampler.get_all_classifier(front_sample,
+                                          back_sample,
+                                          pretrain=donerf_pretrain, rank=rank)
+
+    chunks = (len(rays['ray_d']) + chunk_size - 1) // chunk_size
+    rays_split = [OrderedDict() for _ in range(chunks)]
+
+    for k, v in rays.items():
+        if torch.is_tensor(v):
+            split = torch.split(v, chunk_size)
+            for i in range(chunks):
+                rays_split[i][k] = split[i]
+
+    rgbs = []
+    depths = []
+
+    likelis_fg = []
+    likelis_bg = []
+
+
+
+    for _rays in rays_split:
+        chunk_ret = render_rays(models, _rays, train_box_only, have_box,
+                                donerf_pretrain, front_sample, back_sample,
+                                fg_bg_net, use_zval)
+
+        if donerf_pretrain:
+            likelis_fg.append(chunk_ret['likeli_fg'])
+            likelis_bg.append(chunk_ret['likeli_bg'])
+
+
+        else:
+            rgbs.append(chunk_ret['rgb'])
+            depths.append(chunk_ret['depth_fgbg'])
+
+    if donerf_pretrain:
+        likeli_fg = torch.cat(likelis_fg).view(ray_sampler.H * ray_sampler.W, -1).squeeze()
+        likeli_bg = torch.cat(likelis_bg).view(ray_sampler.H * ray_sampler.W, -1).squeeze()
+        rgb = None
+        d = None
+
+    else:
+        rgb = torch.cat(rgbs).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+        d = torch.cat(depths).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+        likeli_fg = None
+        likeli_bg = None
+    return rgb, d, likeli_fg, likeli_bg, rays['cls_label']
+
+def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sample):
+    if fg_bg_net:
+
+        if use_zval:
+
+            ret = net_oracle(rays['ray_o'], rays['ray_d'],
+                     rays['fg_z_vals_centre'], rays['bg_z_vals_centre'],
+                     rays['fg_far_depth'])
+        else:
+            ret = net_oracle(rays['ray_o'], rays['ray_d'],
+                         rays['fg_pts_flat'], rays['bg_pts_flat'],
+                         rays['fg_far_depth'])
+    else:
+        if use_zval:
+            pts = torch.cat([rays['fg_z_vals_centre'], rays['bg_z_vals_centre']], dim=-1)
+        else:
+            pts = torch.cat([rays['fg_pts_flat'], rays['bg_pts_flat']], dim=-1)
+        ret = net_oracle(rays['ray_o'], rays['ray_d'], pts)
+
+        ret['likeli_fg'] = ret['likeli'][:, :front_sample]
+        ret['likeli_bg'] = ret['likeli'][:, front_sample:]
+
+    return ret
+
+def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
+               bg_z_vals_centre, samples, box_weights=None, train_box_only=False):
+
+    fg_depth_mid = fg_z_vals_centre
+    fg_weights = data['likeli_fg'].clone() # Avoid inplace ops
+    fg_weights = F.softmax(fg_weights, dim=-1)[:, 2:front_sample]
+
+    if box_weights is not None:
+        fg_weights = fg_weights + normalize_torch(box_weights[:, 1:])
+
+
+    # fg_weights[fg_depth_mid[:,:-1]<0.] =0.
+    fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights,
+                          N_samples=samples, det=False))  # [..., N_samples]
+    # fg_depth[fg_depth<0.] = 0.
+
+    bg_depth_mid = bg_z_vals_centre
+
+
+    bg_weights = data['likeli_bg'].clone()
+    bg_weights = F.softmax(bg_weights, dim=-1)[:, 1:back_sample-1]
+    # bg_weights[bg_depth_mid[:,:-1]<0.] =0.
+    bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
+                          N_samples=samples, det=False))  # [..., N_samples]
+    # bg_depth[bg_depth<0.] = 0.
+
+    return fg_depth, bg_depth
+
+
+def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
+                front_sample, back_sample, fg_bg_net, use_zval):
+    """Render a set of rays using specific config."""
+
+    # forward and backward
+
+    ray_o = rays['ray_o']
+    ray_d = rays['ray_d']
+    box_loc = rays['box_loc'] if have_box else None
+    fg_z_vals_centre = rays['fg_z_vals_centre']
+    bg_z_vals_centre = rays['bg_z_vals_centre']
+    fg_far_depth = rays['fg_far_depth']
+    net_oracle = models['net_oracle']
+
+    ret = eval_oracle(rays, net_oracle, fg_bg_net, use_zval, front_sample, back_sample)
+
+    if donerf_pretrain:
+        return ret
+    else:
+
+        net = models['net_0']
+        samples = models['cascade_samples'][0]
+
+        box_weights = None
+        if box_loc is not None:
+            box_ret = net(ray_o, ray_d, fg_far_depth, fg_z_vals_centre,
+                          bg_z_vals=None, box_loc=box_loc,
+                          query_box_only=True)
+            box_weights = box_ret['fg_box_sig']
+
+        fg_depth, bg_depth = get_depths(ret, front_sample, back_sample,
+                                        fg_z_vals_centre, bg_z_vals_centre,
+                                        samples, box_weights, train_box_only)
+
+
+        if not have_box:
+            ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
+        elif not train_box_only:
+            ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc)
+        else:
+            ret = net(ray_o, ray_d, fg_far_depth, fg_depth)
+
+        return ret
+
+
+
+
+
+def render_single_image_(rank, world_size, models, ray_sampler, chunk_size, \
                         train_box_only= False,have_box=False, donerf_pretrain=False, \
                         front_sample=128, back_sample=128, fg_bg_net=True, use_zval=False):
     ##### parallel rendering of a single image
@@ -367,25 +537,11 @@ def log_view_to_tb(writer, global_step, log_data, gt_img, mask, gt_depth=None, t
            #writer.add_image(prefix + 'level_{}/bg_lambda'.format(m), bg_lambda_im, global_step)
 
 
-def setup(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    port = np.random.randint(12355, 12399)
-    os.environ['MASTER_PORT'] = '{}'.format(port)
-    #os.environ['MASTER_PORT'] = '12355'
-    # initialize the process group
-    torch.distributed.init_process_group("gloo", rank=rank, world_size=world_size)
-
-
-def cleanup():
-    torch.distributed.destroy_process_group()
-
-
 def create_nerf(rank, args):
     ###### create network and wrap in ddp; each process should do this
     # fix random seed just to make sure the network is initialized with same weights at different processes
     torch.manual_seed(777)
-    # very important!!! otherwise it might introduce extra memory in rank=0 gpu
-    torch.cuda.set_device(rank)
+
 
 
 
@@ -395,28 +551,23 @@ def create_nerf(rank, args):
         ora_net = DepthOracle(args).to(rank)
     # else:
     #     ora_net = DepthOracleBig(args).to(rank)
-    models['net_oracle'] = ora_net
-    net = DDP(ora_net, device_ids=[rank], output_device=rank, find_unused_parameters=True)
-    optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
+    models['net_oracle'] = WrapperModule(ora_net)
+    optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
     models['optim_oracle'] = optim
 
-    # if args.donerf_pretrain == False:
-    models['cascade_level'] = args.cascade_level
-    models['cascade_samples'] = [int(x.strip()) for x in args.cascade_samples.split(',')]
-    for m in range(models['cascade_level']):
-        img_names = None
 
-        if args.train_box_only:
-            net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
-        elif args.have_box:
-            net = NerfNetBoxWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
-        else:
-            net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
-        net = DDP(net, device_ids=[rank], output_device=rank, find_unused_parameters=True)
-        # net = DDP(net, device_ids=[rank], output_device=rank)
-        optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
-        models['net_{}'.format(m)] = net
-        models['optim_{}'.format(m)] = optim
+    img_names = None
+
+    if args.train_box_only:
+        net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+    elif args.have_box:
+        net = NerfNetBoxWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+    else:
+        net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+
+    optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
+    models['net_0'] = WrapperModule(net)
+    models['optim_0'] = optim
 
     start = -1
 
@@ -441,7 +592,7 @@ def create_nerf(rank, args):
         logger.info('Reloading from: {}'.format(fpath))
         start = path2iter(fpath)
         # configure map_location properly for different processes
-        map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
+        map_location = 'cuda:%d' % rank
         to_load = torch.load(fpath, map_location=map_location)
 
         models['optim_oracle'].load_state_dict(to_load['optim_oracle'])
@@ -466,7 +617,7 @@ def create_nerf(rank, args):
 
     elif args.have_box:
 
-        map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
+        map_location = 'cuda:%d' % rank
         # fpath_box = '/home/sally/nerf/nerfplusplus/logs/box_300_2-1_fullview_sc0.5_mx100-140/model_485000.pth'
         # fpath_sc = '/home/sally/nerf/nerfplusplus/logs/newinter_10x10x18_npp/model_770000.pth'
 
@@ -524,26 +675,24 @@ def create_nerf(rank, args):
 
 
 def ddp_train_nerf(rank, args):
-    ###### set up multi-processing
-    setup(rank, args.world_size)
+
     ###### set up logger
     logger = logging.getLogger(__package__)
     setup_logger()
 
 
     ###### Create log dir and copy the config file
-    if rank == 0:
-        os.makedirs(os.path.join(args.basedir, args.expname), exist_ok=True)
-        f = os.path.join(args.basedir, args.expname, 'args.txt')
+
+    os.makedirs(os.path.join(args.basedir, args.expname), exist_ok=True)
+    f = os.path.join(args.basedir, args.expname, 'args.txt')
+    with open(f, 'w') as file:
+        for arg in (vars(args)):
+            attr = getattr(args, arg)
+            file.write('{} = {}\n'.format(arg, attr))
+    if args.config is not None:
+        f = os.path.join(args.basedir, args.expname, 'config.txt')
         with open(f, 'w') as file:
-            for arg in (vars(args)):
-                attr = getattr(args, arg)
-                file.write('{} = {}\n'.format(arg, attr))
-        if args.config is not None:
-            f = os.path.join(args.basedir, args.expname, 'config.txt')
-            with open(f, 'w') as file:
-                file.write(open(args.config, 'r').read())
-    torch.distributed.barrier()
+            file.write(open(args.config, 'r').read())
 
 
     # HERE SHOULD HAVE ONE HOT EMBEDDING
@@ -565,9 +714,7 @@ def ddp_train_nerf(rank, args):
     # make sure different processes have different perturbations in depth samples
     torch.manual_seed((rank + 1) * 777)
 
-    ##### only main process should do the logging
-    if rank == 0:
-        writer = SummaryWriter(os.path.join(args.basedir, 'summaries', args.expname))
+    writer = SummaryWriter(os.path.join(args.basedir, 'summaries', args.expname))
         
     # start training
     what_val_to_log = 0             # helper variable for parallel rendering of a image
@@ -587,7 +734,7 @@ def ddp_train_nerf(rank, args):
 
         ray_batch = ray_samplers[i].random_sample_classifier(args.N_rand,
                                                              args.front_sample, args.back_sample,
-                                                             center_crop=False, pretrain=args.donerf_pretrain)
+                                                             pretrain=args.donerf_pretrain, rank=rank)
 
         if time_program:
             cur_time_sp = time.time()-time0
@@ -812,7 +959,7 @@ def ddp_train_nerf(rank, args):
         scalars_to_log['iter_time'] = dt
 
         ### only main process should do the logging
-        if rank == 0 and (global_step % args.i_print == 0 or global_step < 10):
+        if (global_step % args.i_print == 0 or global_step < 10):
             # print('=======likeli=====')
             # print(out_likeli_fg)
             # print(out_likeli_bg)
@@ -834,271 +981,258 @@ def ddp_train_nerf(rank, args):
 
             print('IMAGE_ID: {}'.format(idx))
 
-            log_data, label = render_single_image(rank, args.world_size, models, val_ray_samplers[idx], args.chunk_size, \
-                                           args.train_box_only, have_box=args.have_box, donerf_pretrain=args.donerf_pretrain,\
-                                           front_sample=args.front_sample, back_sample=args.back_sample, fg_bg_net=args.fg_bg_net, use_zval=args.use_zval)
+            with torch.no_grad():
+                rgb, d, pred_fg, pred_bg, label  = render_single_image(models, val_ray_samplers[idx], args.chunk_size,
+                                               args.train_box_only, have_box=args.have_box, donerf_pretrain=args.donerf_pretrain,
+                                               front_sample=args.front_sample, back_sample=args.back_sample, fg_bg_net=args.fg_bg_net,
+                                               use_zval=args.use_zval, rank=rank)
+
+            if loss_type == 'bce':
+                out_likeli_fg = np.array(torch.sigmoid(pred_fg).cpu().detach().numpy())
+                out_likeli_bg = np.array(torch.sigmoid(pred_bg).cpu().detach().numpy())
+            else:
+                out_likeli_fg = np.array(torch.nn.functional.softmax(pred_fg, dim=-1).cpu().detach().numpy())
+                out_likeli_bg = np.array(torch.nn.functional.softmax(pred_bg, dim=-1).cpu().detach().numpy())
 
             what_val_to_log += 1
             dt = time.time() - time0
-            if rank == 0:    # only main process should do this
-                logger.info('Logged a random validation view in {} seconds'.format(dt))
 
-                if args.donerf_pretrain:
-                    # if args.fg_bg_net:
+            logger.info('Logged a random validation view in {} seconds'.format(dt))
 
-                    label_fg = label[:, :args.front_sample]
-                    label_bg = label[:, args.front_sample:]
+            if args.donerf_pretrain:
+                # if args.fg_bg_net:
 
+                label_fg = label[:, :args.front_sample]
+                label_bg = label[:, args.front_sample:]
 
-                    pred_fg = torch.reshape(log_data[0]['likeli_fg'], (360*640,-1))
-                    pred_bg = torch.reshape(log_data[0]['likeli_bg'], (360*640,-1))
+                if loss_type == 'bce':
+                    loss_fg = loss_bce(pred_fg[select_inds],  label_fg[select_inds])
+                    loss_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds])
+                    scalars_to_log['val/bce_loss_fg'] = loss_fg.item()
+                    scalars_to_log['val/bce_loss_bg'] = loss_bg.item()
 
+                elif loss_type == 'ce':
+                    loss_fg = crossEntropy(label_fg[select_inds], torch.sigmoid(pred_fg[select_inds]))
+                    loss_bg = crossEntropy(label_bg[select_inds], torch.sigmoid(pred_bg[select_inds]))
+                    scalars_to_log['val/ce_loss_fg'] = loss_fg.item()
+                    scalars_to_log['val/ce_loss_bg'] = loss_bg.item()
 
-                    if loss_type == 'bce':
-                        loss_fg = loss_bce(pred_fg.detach().cpu(),  label_fg.detach().cpu())
-                        loss_bg = loss_bce(pred_bg.detach().cpu(), label_bg.detach().cpu())
-                        scalars_to_log['val/bce_loss_fg'] = loss_fg.item()
-                        scalars_to_log['val/bce_loss_bg'] = loss_bg.item()
+                elif loss_type == 'cebce':
+                    loss_b_fg = loss_bce(pred_fg[select_inds], label_fg[select_inds])
+                    loss_b_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds])
+                    scalars_to_log['val/bce_loss_fg'] = loss_b_fg.item()
+                    scalars_to_log['val/bce_loss_bg'] = loss_b_bg.item()
 
-                    elif loss_type == 'ce':
-                        loss_fg = crossEntropy(label_fg.detach().cpu(), torch.sigmoid(pred_fg.detach().cpu()))
-                        loss_bg = crossEntropy(label_bg.detach().cpu(), torch.sigmoid(pred_bg.detach().cpu()))
-                        scalars_to_log['val/ce_loss_fg'] = loss_fg.item()
-                        scalars_to_log['val/ce_loss_bg'] = loss_bg.item()
+                    loss_c_fg = crossEntropy(label_fg[select_inds], pred_fg[select_inds])
+                    loss_c_bg = crossEntropy(label_bg[select_inds], pred_bg[select_inds])
+                    scalars_to_log['val/ce_loss_fg'] = loss_c_fg.item()
+                    scalars_to_log['val/ce_loss_bg'] = loss_c_bg.item()
 
-                    elif loss_type == 'cebce':
-                        loss_b_fg = loss_bce(pred_fg.detach().cpu(), label_fg.detach().cpu())
-                        loss_b_bg = loss_bce(pred_bg.detach().cpu(), label_bg.detach().cpu())
-                        scalars_to_log['val/bce_loss_fg'] = loss_b_fg.item()
-                        scalars_to_log['val/bce_loss_bg'] = loss_b_bg.item()
-
-                        loss_c_fg = crossEntropy(label_fg.detach().cpu(), pred_fg.detach().cpu())
-                        loss_c_bg = crossEntropy(label_bg.detach().cpu(), pred_bg.detach().cpu())
-                        scalars_to_log['val/ce_loss_fg'] = loss_c_fg.item()
-                        scalars_to_log['val/ce_loss_bg'] = loss_c_bg.item()
-
-                        loss_fg = loss_b_fg + loss_c_fg
-                        loss_bg = loss_b_bg + loss_c_bg
+                    loss_fg = loss_b_fg + loss_c_fg
+                    loss_bg = loss_b_bg + loss_c_bg
 
 
-                    if add_entropy:
-                        loss_entr_fg = entropy_loss(pred_fg)
-                        loss_entr_bg = entropy_loss(pred_bg)
-                        scalars_to_log['val/entr_loss_fg'] = loss_entr_fg.item()
-                        scalars_to_log['val/entr_loss_bg'] = loss_entr_bg.item()
+                if add_entropy:
+                    loss_entr_fg = entropy_loss(pred_fg[select_inds])
+                    loss_entr_bg = entropy_loss(pred_bg[select_inds])
+                    scalars_to_log['val/entr_loss_fg'] = loss_entr_fg.item()
+                    scalars_to_log['val/entr_loss_bg'] = loss_entr_bg.item()
 
 
-                    if args.fg_bg_net:
-                        if add_entropy:
-                            loss_cls = (loss_fg + loss_bg) + 0.1 * ( loss_entr_fg + loss_entr_bg)
-                            del loss_entr_fg
-                            del loss_entr_bg
-
-                        else:
-                            loss_cls = (loss_fg + loss_bg)
-                    else:
-                        pred = torch.reshape(log_data[0]['likeli'], (360 * 640, -1))
-                        loss_cls = loss_bce(pred.detach().cpu(), label.detach().cpu())
-
-
-                    scalars_to_log['val/loss'] = loss_cls.item()
-
-
-
-                    del loss_fg
-                    del loss_bg
-
-                    if loss_type == 'bce':
-                        out_likeli_fg = np.array(torch.sigmoid(pred_fg).cpu().detach().numpy())
-                        out_likeli_bg = np.array(torch.sigmoid(pred_bg).cpu().detach().numpy())
-                    else:
-                        out_likeli_fg = np.array(torch.nn.functional.softmax(pred_fg,dim=-1).cpu().detach().numpy())
-                        out_likeli_bg = np.array(torch.nn.functional.softmax(pred_bg,dim=-1).cpu().detach().numpy())
-
-
-                        #out_likeli_fg = np.array(normalize_torch(pred_fg).cpu().detach().numpy())
-                        #out_likeli_bg = np.array(normalize_torch(pred_bg).cpu().detach().numpy())
-
-                    metrics_fg = calculate_metrics(out_likeli_fg, np.array(label_fg.cpu().detach().numpy()),
-                                                   'micro')
-
-                    for k in metrics_fg:
-                        scalars_to_log['val/'+ k + '_fg'] = metrics_fg[k]
-
-                    # log_plot_conf_mat(writer, metrics_fg['cm'], global_step, 'val/CM_fg')
-
-                    metrics_bg = calculate_metrics(out_likeli_bg, np.array(label_bg.cpu().detach().numpy()),
-                                                   'micro')
-
-                    for k in metrics_bg:
-                        scalars_to_log['val/'+ k + '_bg'] = metrics_bg[k]
-
-                    # log_plot_conf_mat(writer, metrics_bg['cm'], global_step, 'val/CM_bg')
-                    visualize_depth_label(writer, np.array(label_fg.cpu().detach().numpy())[select_inds], out_likeli_fg[select_inds], global_step, 'val/dVis_fg')
-                    visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds], out_likeli_bg[select_inds], global_step, 'val/dVis_bg')
-
-                    # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
-                    #                out_likeli_fg[select_inds], global_step, 'val/LossVis_fg')
-                    # loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
-                    #                out_likeli_bg[select_inds], global_step, 'val/LossVis_bg')
-
-
-                    logstr = '[=VALIDATION=] {} step: {} '.format(args.expname, global_step)
-                    for k in scalars_to_log:
-                        logstr += ' {}: {:.6f}'.format(k, scalars_to_log[k])
-                        writer.add_scalar(k, scalars_to_log[k], global_step)
-                    logger.info(logstr)
-                    del log_data
-                    del metrics_fg
-
-                    del metrics_bg
-                    del out_likeli_fg
-                    del out_likeli_bg
-
-
+                if add_entropy:
+                    loss_cls = (loss_fg + loss_bg) + 0.1 * ( loss_entr_fg + loss_entr_bg)
+                    del loss_entr_fg
+                    del loss_entr_bg
 
                 else:
+                    loss_cls = (loss_fg + loss_bg)
 
-                    #if args.depth_training:
-                    log_view_to_tb(writer, global_step, log_data, gt_depth=ray_samplers[idx].get_depth(), gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
-                    del log_data
+                scalars_to_log['val/loss'] = loss_cls.item()
 
-                    #else:
-                     #   log_view_to_tb(writer, global_step, log_data, gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
+
+
+                del loss_fg
+                del loss_bg
+
+
+                    #out_likeli_fg = np.array(normalize_torch(pred_fg).cpu().detach().numpy())
+                    #out_likeli_bg = np.array(normalize_torch(pred_bg).cpu().detach().numpy())
+
+                metrics_fg = calculate_metrics(out_likeli_fg, np.array(label_fg.cpu().detach().numpy()),
+                                               'micro')
+
+                for k in metrics_fg:
+                    scalars_to_log['val/'+ k + '_fg'] = metrics_fg[k]
+
+                # log_plot_conf_mat(writer, metrics_fg['cm'], global_step, 'val/CM_fg')
+
+                metrics_bg = calculate_metrics(out_likeli_bg, np.array(label_bg.cpu().detach().numpy()),
+                                               'micro')
+
+                for k in metrics_bg:
+                    scalars_to_log['val/'+ k + '_bg'] = metrics_bg[k]
+
+                # log_plot_conf_mat(writer, metrics_bg['cm'], global_step, 'val/CM_bg')
+                visualize_depth_label(writer, np.array(label_fg.cpu().detach().numpy())[select_inds], out_likeli_fg[select_inds], global_step, 'val/dVis_fg')
+                visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds], out_likeli_bg[select_inds], global_step, 'val/dVis_bg')
+
+                # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
+                #                out_likeli_fg[select_inds], global_step, 'val/LossVis_fg')
+                # loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
+                #                out_likeli_bg[select_inds], global_step, 'val/LossVis_bg')
+
+
+                logstr = '[=VALIDATION=] {} step: {} '.format(args.expname, global_step)
+                for k in scalars_to_log:
+                    logstr += ' {}: {:.6f}'.format(k, scalars_to_log[k])
+                    writer.add_scalar(k, scalars_to_log[k], global_step)
+                logger.info(logstr)
+
+                del metrics_fg
+
+                del metrics_bg
+                del out_likeli_fg
+                del out_likeli_bg
+
+
+
+            else:
+
+                #if args.depth_training:
+                log_view_to_tb(writer, global_step, log_data, gt_depth=ray_samplers[idx].get_depth(), gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
+
+
+                #else:
+                 #   log_view_to_tb(writer, global_step, log_data, gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
 
             idx = what_train_to_log % len(ray_samplers)
             print('IMAGE_ID-train: {}'.format(idx))
-            log_data, label = render_single_image(rank, args.world_size, models, ray_samplers[idx], args.chunk_size, \
-                                                  args.train_box_only, have_box=args.have_box,
-                                                  donerf_pretrain=args.donerf_pretrain, \
-                                                  front_sample=args.front_sample, back_sample=args.back_sample,
-                                                  fg_bg_net=args.fg_bg_net, use_zval=args.use_zval)
+
+            with torch.no_grad():
+                rgb, d, pred_fg, pred_bg, label = render_single_image(models, ray_samplers[idx], args.chunk_size,
+                                                      args.train_box_only, have_box=args.have_box,
+                                                      donerf_pretrain=args.donerf_pretrain,
+                                                      front_sample=args.front_sample, back_sample=args.back_sample,
+                                                      fg_bg_net=args.fg_bg_net, use_zval=args.use_zval, rank=rank)
 
             what_train_to_log += 1
             dt = time.time() - time0
-            if rank == 0:  # only main process should do this
-                logger.info('Logged a random validation view in {} seconds'.format(dt))
 
-                if args.donerf_pretrain:
-                    # if args.fg_bg_net:
+            logger.info('Logged a random validation view in {} seconds'.format(dt))
 
-                    label_fg = label[:, :args.front_sample]
-                    label_bg = label[:, args.front_sample:]
+            if args.donerf_pretrain:
+                # if args.fg_bg_net:
 
-                    pred_fg = torch.reshape(log_data[0]['likeli_fg'], (360 * 640, -1))
-                    pred_bg = torch.reshape(log_data[0]['likeli_bg'], (360 * 640, -1))
+                label_fg = label[:, :args.front_sample]
+                label_bg = label[:, args.front_sample:]
 
-                    if loss_type == 'bce':
-                        loss_fg = loss_bce(pred_fg.detach().cpu(), label_fg.detach().cpu())
-                        loss_bg = loss_bce(pred_bg.detach().cpu(), label_bg.detach().cpu())
-                        scalars_to_log['train/bce_loss_fg'] = loss_fg.item()
-                        scalars_to_log['train/bce_loss_bg'] = loss_bg.item()
+                if loss_type == 'bce':
+                    loss_fg = loss_bce(pred_fg[select_inds], label_fg[select_inds])
+                    loss_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds])
+                    scalars_to_log['train/bce_loss_fg'] = loss_fg.item()
+                    scalars_to_log['train/bce_loss_bg'] = loss_bg.item()
 
-                    elif loss_type == 'ce':
-                        loss_fg = crossEntropy(label_fg.detach().cpu(), torch.sigmoid(pred_fg.detach().cpu()))
-                        loss_bg = crossEntropy(label_bg.detach().cpu(), torch.sigmoid(pred_bg.detach().cpu()))
-                        scalars_to_log['train/ce_loss_fg'] = loss_fg.item()
-                        scalars_to_log['train/ce_loss_bg'] = loss_bg.item()
+                elif loss_type == 'ce':
+                    loss_fg = crossEntropy(label_fg[select_inds], torch.sigmoid(pred_fg[select_inds]))
+                    loss_bg = crossEntropy(label_bg[select_inds], torch.sigmoid(pred_bg[select_inds]))
+                    scalars_to_log['train/ce_loss_fg'] = loss_fg.item()
+                    scalars_to_log['train/ce_loss_bg'] = loss_bg.item()
 
-                    elif loss_type == 'cebce':
-                        loss_b_fg = loss_bce(pred_fg.detach().cpu(), label_fg.detach().cpu())
-                        loss_b_bg = loss_bce(pred_bg.detach().cpu(), label_bg.detach().cpu())
-                        scalars_to_log['train/bce_loss_fg'] = loss_b_fg.item()
-                        scalars_to_log['train/bce_loss_bg'] = loss_b_bg.item()
+                elif loss_type == 'cebce':
+                    loss_b_fg = loss_bce(pred_fg[select_inds], label_fg[select_inds])
+                    loss_b_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds])
+                    scalars_to_log['train/bce_loss_fg'] = loss_b_fg.item()
+                    scalars_to_log['train/bce_loss_bg'] = loss_b_bg.item()
 
-                        loss_c_fg = crossEntropy(label_fg.detach().cpu(), pred_fg.detach().cpu())
-                        loss_c_bg = crossEntropy(label_bg.detach().cpu(), pred_bg.detach().cpu())
-                        scalars_to_log['train/ce_loss_fg'] = loss_c_fg.item()
-                        scalars_to_log['train/ce_loss_bg'] = loss_c_bg.item()
+                    loss_c_fg = crossEntropy(label_fg[select_inds], pred_fg[select_inds])
+                    loss_c_bg = crossEntropy(label_bg[select_inds], pred_bg[select_inds])
+                    scalars_to_log['train/ce_loss_fg'] = loss_c_fg.item()
+                    scalars_to_log['train/ce_loss_bg'] = loss_c_bg.item()
 
-                        loss_fg = loss_b_fg + loss_c_fg
-                        loss_bg = loss_b_bg + loss_c_bg
+                    loss_fg = loss_b_fg + loss_c_fg
+                    loss_bg = loss_b_bg + loss_c_bg
 
-                    if add_entropy:
-                        loss_entr_fg = entropy_loss(pred_fg)
-                        loss_entr_bg = entropy_loss(pred_bg)
-                        scalars_to_log['train/entr_loss_fg'] = loss_entr_fg.item()
-                        scalars_to_log['train/entr_loss_bg'] = loss_entr_bg.item()
-
-                    if args.fg_bg_net:
-                        if add_entropy:
-                            loss_cls = (loss_fg + loss_bg) + 0.1 * (loss_entr_fg + loss_entr_bg)
-                            del loss_entr_fg
-                            del loss_entr_bg
-                        else:
-                            loss_cls = (loss_fg + loss_bg)
-                    else:
-                        pred = torch.reshape(log_data[0]['likeli'], (360 * 640, -1))
-                        loss_cls = loss_bce(pred.detach().cpu(), label.detach().cpu())
-
-                    scalars_to_log['train/loss'] = loss_cls.item()
-
-                    del loss_fg
-                    del loss_bg
-
-                    if loss_type == 'bce':
-                        out_likeli_fg = np.array(torch.sigmoid(pred_fg).cpu().detach().numpy())
-                        out_likeli_bg = np.array(torch.sigmoid(pred_bg).cpu().detach().numpy())
-                    else:
-                        out_likeli_fg = np.array(torch.nn.functional.softmax(pred_fg,dim=-1).cpu().detach().numpy())
-                        out_likeli_bg = np.array(torch.nn.functional.softmax(pred_bg,dim=-1).cpu().detach().numpy())
-                        #out_likeli_fg = np.array(normalize_torch(pred_fg).cpu().detach().numpy())
-                        #out_likeli_bg = np.array(normalize_torch(pred_bg).cpu().detach().numpy())
+                if add_entropy:
+                    loss_entr_fg = entropy_loss(pred_fg[select_inds])
+                    loss_entr_bg = entropy_loss(pred_bg[select_inds])
+                    scalars_to_log['train/entr_loss_fg'] = loss_entr_fg.item()
+                    scalars_to_log['train/entr_loss_bg'] = loss_entr_bg.item()
 
 
-                    metrics_fg = calculate_metrics(out_likeli_fg, np.array(label_fg.cpu().detach().numpy()),
-                                                   'micro')
-
-                    for k in metrics_fg:
-                        scalars_to_log['train/' + k + '_fg'] = metrics_fg[k]
-
-                    # log_plot_conf_mat(writer, metrics_fg['cm'], global_step, 'val/CM_fg')
-
-
-                    metrics_bg = calculate_metrics(out_likeli_bg, np.array(label_bg.cpu().detach().numpy()),
-                                                   'micro')
-
-                    for k in metrics_bg:
-                        scalars_to_log['train/' + k + '_bg'] = metrics_bg[k]
-
-                    # log_plot_conf_mat(writer, metrics_bg['cm'], global_step, 'val/CM_bg')
-                    visualize_depth_label(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
-                                          out_likeli_fg[select_inds], global_step, 'train/dVis_fg')
-                    visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
-                                          out_likeli_bg[select_inds], global_step, 'train/dVis_bg')
-                    #
-                    # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
-                    #                       out_likeli_fg[select_inds], global_step, 'train/LossVis_fg')
-                    # loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
-                    #                       out_likeli_bg[select_inds], global_step, 'train/LossVis_bg')
-
-
-                    logstr = '[=VALID_TRAIN] {} step: {} '.format(args.expname, global_step)
-                    for k in scalars_to_log:
-                        logstr += ' {}: {:.6f}'.format(k, scalars_to_log[k])
-                        writer.add_scalar(k, scalars_to_log[k], global_step)
-                    logger.info(logstr)
-                    del log_data
-                    del metrics_fg
-
-                    del metrics_bg
-                    del out_likeli_fg
-                    del out_likeli_bg
-
-
-
+                if add_entropy:
+                    loss_cls = (loss_fg + loss_bg) + 0.1 * (loss_entr_fg + loss_entr_bg)
+                    del loss_entr_fg
+                    del loss_entr_bg
                 else:
+                    loss_cls = (loss_fg + loss_bg)
 
-                    # if args.depth_training:
-                    log_view_to_tb(writer, global_step, log_data, gt_depth=ray_samplers[idx].get_depth(),
-                                   gt_img=ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
-                                   train_box_only=args.train_box_only, prefix='train/')
-                    del log_data
+
+                scalars_to_log['train/loss'] = loss_cls.item()
+
+                del loss_fg
+                del loss_bg
+
+                if loss_type == 'bce':
+                    out_likeli_fg = np.array(torch.sigmoid(pred_fg).cpu().detach().numpy())
+                    out_likeli_bg = np.array(torch.sigmoid(pred_bg).cpu().detach().numpy())
+                else:
+                    out_likeli_fg = np.array(torch.nn.functional.softmax(pred_fg,dim=-1).cpu().detach().numpy())
+                    out_likeli_bg = np.array(torch.nn.functional.softmax(pred_bg,dim=-1).cpu().detach().numpy())
+                    #out_likeli_fg = np.array(normalize_torch(pred_fg).cpu().detach().numpy())
+                    #out_likeli_bg = np.array(normalize_torch(pred_bg).cpu().detach().numpy())
+
+
+                metrics_fg = calculate_metrics(out_likeli_fg, np.array(label_fg.cpu().detach().numpy()),
+                                               'micro')
+
+                for k in metrics_fg:
+                    scalars_to_log['train/' + k + '_fg'] = metrics_fg[k]
+
+
+                metrics_bg = calculate_metrics(out_likeli_bg, np.array(label_bg.cpu().detach().numpy()),
+                                               'micro')
+
+                for k in metrics_bg:
+                    scalars_to_log['train/' + k + '_bg'] = metrics_bg[k]
+
+                # log_plot_conf_mat(writer, metrics_bg['cm'], global_step, 'val/CM_bg')
+                visualize_depth_label(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
+                                      out_likeli_fg[select_inds], global_step, 'train/dVis_fg')
+                visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
+                                      out_likeli_bg[select_inds], global_step, 'train/dVis_bg')
+                #
+                # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
+                #                       out_likeli_fg[select_inds], global_step, 'train/LossVis_fg')
+                # loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
+                #                       out_likeli_bg[select_inds], global_step, 'train/LossVis_bg')
+
+
+                logstr = '[=VALID_TRAIN] {} step: {} '.format(args.expname, global_step)
+                for k in scalars_to_log:
+                    logstr += ' {}: {:.6f}'.format(k, scalars_to_log[k])
+                    writer.add_scalar(k, scalars_to_log[k], global_step)
+                logger.info(logstr)
+
+                del metrics_fg
+
+                del metrics_bg
+                del out_likeli_fg
+                del out_likeli_bg
+
+
+
+            else:
+
+                # if args.depth_training:
+                log_view_to_tb(writer, global_step, log_data, gt_depth=ray_samplers[idx].get_depth(),
+                               gt_img=ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
+                               train_box_only=args.train_box_only, prefix='train/')
+                del log_data
 
 
             torch.cuda.empty_cache()
 
-        if rank == 0 and (global_step % args.i_weights == 0 and global_step > 0):
+        if (global_step % args.i_weights == 0 and global_step > 0):
             # saving checkpoints and logging
             fpath = os.path.join(args.basedir, args.expname, 'model_{:06d}.pth'.format(global_step))
             to_save = OrderedDict()
@@ -1106,16 +1240,10 @@ def ddp_train_nerf(rank, args):
             to_save['net_oracle'] = models['net_oracle'].state_dict()
             to_save['optim_oracle'] = models['optim_oracle'].state_dict()
 
-            for m in range(models['cascade_level']):
-                name = 'net_{}'.format(m)
-                to_save[name] = models[name].state_dict()
-
-                name = 'optim_{}'.format(m)
-                to_save[name] = models[name].state_dict()
+            to_save['net_0'] = models['net_0'].state_dict()
+            to_save['optim_0'] = models[ 'optim_0'].state_dict()
             torch.save(to_save, fpath)
 
-    # clean up for multi-processing
-    cleanup()
 
 
 
@@ -1221,14 +1349,8 @@ def train():
     args = parser.parse_args()
     logger.info(parser.format_values())
 
-    if args.world_size == -1:
-        args.world_size = torch.cuda.device_count()
-        logger.info('Using # gpus: {}'.format(args.world_size))
-    torch.multiprocessing.spawn(ddp_train_nerf,
-                                args=(args,),
-                                nprocs=args.world_size,
-                                join=True)
-
+    rank = torch.cuda.current_device()
+    ddp_train_nerf(rank, args)
 
 if __name__ == '__main__':
     setup_logger()
