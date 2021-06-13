@@ -1,7 +1,7 @@
 ### INPUT
 datadir = /media/diskstation/sally/
 scene = big_inters_nom15_samp4x4_nobox
-expname = ce0.1entr
+expname = ce0.1entr_sig
 
 basedir = ./logs
 config = None
@@ -51,7 +51,6 @@ pencode = True
 use_zval = True
 
 penc_pts = False
-max_freq_log2_pts = 3
-
-
+max_freq_log2_pts=3
+world_size=1
 
