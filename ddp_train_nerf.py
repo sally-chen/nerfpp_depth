@@ -485,52 +485,44 @@ def render_single_image_(rank, world_size, models, ray_sampler, chunk_size, \
         return None
 
 
-def log_view_to_tb(writer, global_step, log_data, gt_img, mask, gt_depth=None, train_box_only= False, have_box=False, prefix=''):
+def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask, gt_depth=None, train_box_only= False, have_box=False, prefix=''):
     rgb_im = img_HWC2CHW(torch.from_numpy(gt_img))
     writer.add_image(prefix + 'rgb_gt', rgb_im, global_step)
+
     depth_clip = 100.
-    # if gt_depth is not None:
-    #
-    #
-    #     gt_depth[gt_depth > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
-    #
-    #
-    #     depth_im = img_HWC2CHW(colorize(gt_depth, cmap_name='jet', append_cbar=True,
-    #                                                         mask=mask, is_np=True))
-    #     writer.add_image(prefix + 'depth_gt', depth_im, global_step)
-
-    for m in range(len(log_data)):
-        rgb_im = img_HWC2CHW(log_data[m]['rgb'])
-        rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
-        writer.add_image(prefix + 'level_{}/rgb'.format(m), rgb_im, global_step)
-        #
-        # #if have_box:
-        # depth = log_data[m]['depth_fgbg']
-        # depth[depth > depth_clip] = depth_clip
-        # depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True,
-        #                                 mask=mask))
-        # writer.add_image(prefix + 'level_{}/depth_fgbg'.format(m), depth_im, global_step)
-        #
+    if gt_depth is not None:
+        gt_depth[gt_depth > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
+        depth_im = img_HWC2CHW(colorize(gt_depth, cmap_name='jet', append_cbar=True, mask=mask, is_np=True))
+        writer.add_image(prefix + 'depth_gt', depth_im, global_step)
 
 
-        rgb_im = img_HWC2CHW(log_data[m]['fg_rgb'])
-        rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
-        writer.add_image(prefix + 'level_{}/fg_rgb'.format(m), rgb_im, global_step)
+    rgb_im = img_HWC2CHW(rgb_predict)
+    rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
+    writer.add_image(prefix + 'level_{}/rgb'.format(m), rgb_im, global_step)
+
+    depth_predict[depth_predict > depth_clip] = depth_clip
+    depth_im = img_HWC2CHW(colorize(depth_predict, cmap_name='jet', append_cbar=True,
+                                    mask=mask))
+    writer.add_image(prefix + 'level_{}/depth_fgbg'.format(m), depth_im, global_step)
+    #
+
+
+        # rgb_im = img_HWC2CHW(log_data[m]['fg_rgb'])
+        # rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
+        # writer.add_image(prefix + 'level_{}/fg_rgb'.format(m), rgb_im, global_step)
         
         # depth = log_data[m]['fg_depth']
         # depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True,
         #                                  mask=mask))
         # writer.add_image(prefix + 'level_{}/fg_depth'.format(m), depth_im, global_step)
-        # #
-        #
-        if not train_box_only:
-           rgb_im = img_HWC2CHW(log_data[m]['bg_rgb'])
-           rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
-           writer.add_image(prefix + 'level_{}/bg_rgb'.format(m), rgb_im, global_step)
-           # depth = log_data[m]['bg_depth']
-           # depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True,
-           #                                 mask=mask))
-           # writer.add_image(prefix + 'level_{}/bg_depth'.format(m), depth_im, global_step)
+
+       # rgb_im = img_HWC2CHW(log_data[m]['bg_rgb'])
+       # rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
+       # writer.add_image(prefix + 'level_{}/bg_rgb'.format(m), rgb_im, global_step)
+       #
+       # depth = log_data[m]['bg_depth']
+       # depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True, mask=mask))
+       # writer.add_image(prefix + 'level_{}/bg_depth'.format(m), depth_im, global_step)
            #bg_lambda = log_data[m]['bg_lambda']
            #bg_lambda_im = img_HWC2CHW(colorize(bg_lambda, cmap_name='hot', append_cbar=True,
            #                                      mask=mask))
@@ -885,7 +877,7 @@ def ddp_train_nerf(rank, args):
                 fg_depth_mid = ray_batch['fg_z_vals_centre']
 
                 #fg_weights = torch.sigmoid(ret['likeli_fg'])[:, 2:args.front_sample].clone().detach()
-                fg_weights = torch.nn.functional.softmax(ret['likeli_fg'],dim=-1)[:, 2:args.front_sample].clone().detach()
+                fg_weights = F.softmax(ret['likeli_fg'],dim=-1)[:, 2:args.front_sample].clone().detach()
 
                 if args.have_box:
                     with torch.no_grad():
@@ -903,7 +895,7 @@ def ddp_train_nerf(rank, args):
 
                 bg_depth_mid = ray_batch['bg_z_vals_centre']
                 #bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach()
-                bg_weights = torch.nn.functional.softmax(ret['likeli_bg'],dim=-1)[:, 1: args.back_sample-1].clone().detach()
+                bg_weights = F.softmax(ret['likeli_bg'],dim=-1)[:, 1: args.back_sample-1].clone().detach()
 
                 # bg_weights[bg_depth_mid[:,:-1]<0.] =0.
                 bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
@@ -935,7 +927,7 @@ def ddp_train_nerf(rank, args):
 
                     depth_loss = dep_l1l2loss(torch.div(1.,d_pred_map), torch.div(1.,d_gt_map), l1l2 = 'l1')
                     #reg_loss = dep_l1l2loss(torch.div(1.,d_pred_map[:512])-torch.div(1.,d_pred_map[512:]), torch.div(1.,d_gt_map[:512])-torch.div(1.,d_gt_map[512:]), l1l2 = 'l1')
-                    loss = rgb_loss * 0.  +  depth_loss
+                    loss = rgb_loss  +  depth_loss
                     #scalars_to_log['level_{}/reg_loss'.format(m)] = reg_loss.item()
 
                     #loss = rgb_loss * 0 +  depth_loss
@@ -1089,7 +1081,6 @@ def ddp_train_nerf(rank, args):
                 logger.info(logstr)
 
                 del metrics_fg
-
                 del metrics_bg
                 del out_likeli_fg
                 del out_likeli_bg
@@ -1099,7 +1090,7 @@ def ddp_train_nerf(rank, args):
             else:
 
                 #if args.depth_training:
-                log_view_to_tb(writer, global_step, log_data, gt_depth=ray_samplers[idx].get_depth(), gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
+                log_view_to_tb(writer, global_step, rgb,d , gt_depth=ray_samplers[idx].get_depth(), gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
 
 
                 #else:
@@ -1214,7 +1205,6 @@ def ddp_train_nerf(rank, args):
                 logger.info(logstr)
 
                 del metrics_fg
-
                 del metrics_bg
                 del out_likeli_fg
                 del out_likeli_bg
@@ -1224,10 +1214,10 @@ def ddp_train_nerf(rank, args):
             else:
 
                 # if args.depth_training:
-                log_view_to_tb(writer, global_step, log_data, gt_depth=ray_samplers[idx].get_depth(),
+                log_view_to_tb(writer, global_step, rgb,d, gt_depth=ray_samplers[idx].get_depth(),
                                gt_img=ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
                                train_box_only=args.train_box_only, prefix='train/')
-                del log_data
+
 
 
             torch.cuda.empty_cache()
