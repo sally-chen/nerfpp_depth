@@ -417,7 +417,7 @@ def render_single_image_(rank, world_size, models, ray_sampler, chunk_size, \
 
                 #bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: back_sample-1]
 
-                bg_weights =torch.nn.functional.softmax(ret['likeli_bg'],dim=-1)[:, 1: back_sample-1]
+                bg_weights =torch.nn.functional.softmax(ret['likeli_bg'],dim=-1)[:, 0: back_sample-2]
                 # bg_weights[bg_depth_mid[:,:-1]<0.] =0.
                 bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                                       N_samples=N_samples, det=False))  # [..., N_samples]
@@ -498,12 +498,12 @@ def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask
 
     rgb_im = img_HWC2CHW(rgb_predict)
     rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
-    writer.add_image(prefix + 'level_{}/rgb'.format(m), rgb_im, global_step)
+    writer.add_image(prefix + 'level_0/rgb', rgb_im, global_step)
 
     depth_predict[depth_predict > depth_clip] = depth_clip
     depth_im = img_HWC2CHW(colorize(depth_predict, cmap_name='jet', append_cbar=True,
                                     mask=mask))
-    writer.add_image(prefix + 'level_{}/depth_fgbg'.format(m), depth_im, global_step)
+    writer.add_image(prefix + 'level_{0}/depth_fgbg', depth_im, global_step)
     #
 
 
@@ -538,7 +538,8 @@ def create_nerf(rank, args):
 
 
     models = OrderedDict()
-
+    models['cascade_level'] = 1
+    models['cascade_samples'] = [int(x.strip()) for x in args.cascade_samples.split(',')]
     if args.fg_bg_net:
         ora_net = DepthOracle(args).to(rank)
     # else:
@@ -559,7 +560,9 @@ def create_nerf(rank, args):
 
     optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
     models['net_0'] = WrapperModule(net)
+    # models['net_0'] = net
     models['optim_0'] = optim
+
 
     start = -1
 
@@ -588,23 +591,23 @@ def create_nerf(rank, args):
         to_load = torch.load(fpath, map_location=map_location)
 
         models['optim_oracle'].load_state_dict(to_load['optim_oracle'])
-        models['net_oracle'].load_state_dict(to_load['net_oracle'])
+        models['net_oracle'].module.load_state_dict(to_load['net_oracle'])
         
 
 
         ###########################33 before donerf use random weights for nerf ##########    
-        for m in range(models['cascade_level']):
-            for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-                 models[name].load_state_dict(to_load[name])
+        # for m in range(models['cascade_level']):
+        #     for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
+        #          models[name].load_state_dict(to_load[name])
         ####################################################################################333
          #### tmp for reloading pretrained model
-        # fpath_sc = "./logs/pretrained/scene/model_425000.pth"
-        # to_load_sc = torch.load(fpath_sc, map_location=map_location)
-        #
-        # for k in to_load_sc['net_0'].keys():
-        #       to_load['net_0'][k] = to_load_sc['net_1'][k]
-        #
-        # models['net_0'].load_state_dict(to_load['net_0'])
+        fpath_sc = "./logs/pretrained/scene/model_425000.pth"
+        to_load_sc = torch.load(fpath_sc, map_location=map_location)
+
+        for k in to_load_sc['net_0'].keys():
+              to_load['net_0'][k] = to_load_sc['net_1'][k]
+
+        models['net_0'].load_state_dict(to_load['net_0'])
 
 
     elif args.have_box:
@@ -691,7 +694,7 @@ def ddp_train_nerf(rank, args):
     ray_samplers = load_data_split(args.datadir, args.scene, split='train',
                                    try_load_min_depth=args.load_min_depth, have_box=args.have_box,
                                    train_depth=True)
-    val_ray_samplers = load_data_split(args.datadir, args.scene, split='validation',
+    val_ray_samplers = load_data_split(args.datadir, args.scene, split='validation_old',
                                        try_load_min_depth=args.load_min_depth, skip=args.testskip, have_box=args.have_box,
                                        train_depth=True)
 
@@ -837,6 +840,8 @@ def ddp_train_nerf(rank, args):
             loss_cls.backward()
             optim_oracle.step()
 
+            scalars_to_log['loss'] = loss_cls.item()
+
             if time_program:
                 cur_time_sp = time.time() - cur_time
                 print('[TIME] step loss {}'.format(cur_time_sp))
@@ -867,82 +872,82 @@ def ddp_train_nerf(rank, args):
                     ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(), pts.float())
 
             # results on different cascade levels
-            for m in range(models['cascade_level']):
-                optim = models['optim_{}'.format(m)]
-                net = models['net_{}'.format(m)]
 
-                # sample depths
-                N_samples = models['cascade_samples'][m]
+            optim = models['optim_0']
+            net = models['net_0']
 
-                fg_depth_mid = ray_batch['fg_z_vals_centre']
+            # sample depths
+            N_samples = models['cascade_samples'][0]
 
-                #fg_weights = torch.sigmoid(ret['likeli_fg'])[:, 2:args.front_sample].clone().detach()
-                fg_weights = F.softmax(ret['likeli_fg'],dim=-1)[:, 2:args.front_sample].clone().detach()
+            fg_depth_mid = ray_batch['fg_z_vals_centre']
 
-                if args.have_box:
-                    with torch.no_grad():
-                        ret_box = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth_mid,
-                                bg_z_vals=None, box_loc=ray_batch['box_loc'],
-                                query_box_only=True, img_name=ray_batch['img_name'])
-                        box_weights = ret_box['fg_box_sig']
-                        fg_weights = fg_weights + normalize_torch(box_weights[:,1:])
+            #fg_weights = torch.sigmoid(ret['likeli_fg'])[:, 2:args.front_sample].clone().detach()
+            fg_weights = F.softmax(ret['likeli_fg'],dim=-1)[:, 2:args.front_sample].clone().detach()
 
-                # fg_weights[fg_depth_mid[:,:-1]<0.] = 0.
-                fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights,
-                                              N_samples=N_samples, det=False))    # [..., N_samples]
-                # fg_depth[fg_depth<0.] = 0.
+            if args.have_box:
+                with torch.no_grad():
+                    ret_box = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth_mid,
+                            bg_z_vals=None, box_loc=ray_batch['box_loc'],
+                            query_box_only=True, img_name=ray_batch['img_name'])
+                    box_weights = ret_box['fg_box_sig']
+                    fg_weights = fg_weights + normalize_torch(box_weights[:,1:])
 
-
-                bg_depth_mid = ray_batch['bg_z_vals_centre']
-                #bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach()
-                bg_weights = F.softmax(ret['likeli_bg'],dim=-1)[:, 1: args.back_sample-1].clone().detach()
-
-                # bg_weights[bg_depth_mid[:,:-1]<0.] =0.
-                bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
-                                              N_samples=N_samples, det=False))    # [..., N_samples]
-                # bg_depth[bg_depth<0.] = 0.
+            # fg_weights[fg_depth_mid[:,:-1]<0.] = 0.
+            fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights,
+                                          N_samples=N_samples, det=False))    # [..., N_samples]
+            # fg_depth[fg_depth<0.] = 0.
 
 
+            bg_depth_mid = ray_batch['bg_z_vals_centre']
+            #bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach()
+            bg_weights = F.softmax(ret['likeli_bg'],dim=-1)[:, 0: args.back_sample-2].clone().detach()
 
-                optim.zero_grad()
-                if not args.have_box:
-                    ret = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth, bg_depth, img_name=ray_batch['img_name'])
-                elif not args.train_box_only:
-                    ret = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth, bg_depth, ray_batch['box_loc'], img_name=ray_batch['img_name'])
-                else:
-                    ret = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth,
-                              img_name=ray_batch['img_name'])
+            # bg_weights[bg_depth_mid[:,:-1]<0.] =0.
+            bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
+                                          N_samples=N_samples, det=False))    # [..., N_samples]
+            # bg_depth[bg_depth<0.] = 0.
 
-                all_rets.append(ret)
 
-                rgb_gt = ray_batch['rgb'].to(rank)
-                rgb_loss = img2mse(ret['rgb'], rgb_gt)
-                if args.depth_training:
-                    depth_gt = ray_batch['depth_gt'].to(rank)
-                    depth_pred = ret['depth_fgbg']
-                    #mask =  torch.tensor(0. * np.ones(depth_pred.shape).astype(np.float32)).cuda()
-                    inds = torch.where(depth_gt < 2001.)
-                    d_pred_map = depth_pred[inds]
-                    d_gt_map = depth_gt[inds]
 
-                    depth_loss = dep_l1l2loss(torch.div(1.,d_pred_map), torch.div(1.,d_gt_map), l1l2 = 'l1')
-                    #reg_loss = dep_l1l2loss(torch.div(1.,d_pred_map[:512])-torch.div(1.,d_pred_map[512:]), torch.div(1.,d_gt_map[:512])-torch.div(1.,d_gt_map[512:]), l1l2 = 'l1')
-                    loss = rgb_loss  +  depth_loss
-                    #scalars_to_log['level_{}/reg_loss'.format(m)] = reg_loss.item()
+            optim.zero_grad()
+            if not args.have_box:
+                ret = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth, bg_depth, img_name=ray_batch['img_name'])
+            elif not args.train_box_only:
+                ret = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth, bg_depth, ray_batch['box_loc'], img_name=ray_batch['img_name'])
+            else:
+                ret = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth,
+                          img_name=ray_batch['img_name'])
 
-                    #loss = rgb_loss * 0 +  depth_loss
-                    scalars_to_log['level_{}/depth_loss'.format(m)] = depth_loss.item()
+            all_rets.append(ret)
 
-                else:
-                    loss = rgb_loss
+            rgb_gt = ray_batch['rgb'].to(rank)
+            rgb_loss = img2mse(ret['rgb'], rgb_gt)
+            if args.depth_training:
+                depth_gt = ray_batch['depth_gt'].to(rank)
+                depth_pred = ret['depth_fgbg']
+                #mask =  torch.tensor(0. * np.ones(depth_pred.shape).astype(np.float32)).cuda()
+                inds = torch.where(depth_gt < 2001.)
+                d_pred_map = depth_pred[inds]
+                d_gt_map = depth_gt[inds]
 
-                # print(global_step)
-                scalars_to_log['level_{}/loss'.format(m)] = rgb_loss.item()
-                scalars_to_log['level_{}/pnsr'.format(m)] = mse2psnr(rgb_loss.item())
-                # print('before backward')
-                loss.backward()
-                # print('before step')
-                optim.step()
+                depth_loss = dep_l1l2loss(torch.div(1.,d_pred_map), torch.div(1.,d_gt_map), l1l2 = 'l1')
+                #reg_loss = dep_l1l2loss(torch.div(1.,d_pred_map[:512])-torch.div(1.,d_pred_map[512:]), torch.div(1.,d_gt_map[:512])-torch.div(1.,d_gt_map[512:]), l1l2 = 'l1')
+                loss = rgb_loss  +  depth_loss
+                #scalars_to_log['level_{}/reg_loss'.format(m)] = reg_loss.item()
+
+                #loss = rgb_loss * 0 +  depth_loss
+                scalars_to_log['level_0/depth_loss'] = depth_loss.item()
+
+            else:
+                loss = rgb_loss
+
+            # print(global_step)
+            scalars_to_log['level_0/loss'] = rgb_loss.item()
+            scalars_to_log['level_0/pnsr'] = mse2psnr(rgb_loss.item())
+            # print('before backward')
+            loss.backward()
+            # print('before step')
+            optim.step()
 
 
 
@@ -955,7 +960,7 @@ def ddp_train_nerf(rank, args):
             # print('=======likeli=====')
             # print(out_likeli_fg)
             # print(out_likeli_bg)
-            scalars_to_log['loss'] = loss_cls.item()
+
             logstr = '{} step: {} '.format(args.expname, global_step)
             for k in scalars_to_log:
                 logstr += ' {}: {:.6f}'.format(k, scalars_to_log[k])
@@ -979,12 +984,6 @@ def ddp_train_nerf(rank, args):
                                                front_sample=args.front_sample, back_sample=args.back_sample, fg_bg_net=args.fg_bg_net,
                                                use_zval=args.use_zval, rank=rank)
 
-            if loss_type == 'bce':
-                out_likeli_fg = np.array(torch.sigmoid(pred_fg).cpu().detach().numpy())
-                out_likeli_bg = np.array(torch.sigmoid(pred_bg).cpu().detach().numpy())
-            else:
-                out_likeli_fg = np.array(torch.nn.functional.softmax(pred_fg, dim=-1).cpu().detach().numpy())
-                out_likeli_bg = np.array(torch.nn.functional.softmax(pred_bg, dim=-1).cpu().detach().numpy())
 
             what_val_to_log += 1
             dt = time.time() - time0
@@ -996,6 +995,13 @@ def ddp_train_nerf(rank, args):
 
                 label_fg = label[:, :args.front_sample]
                 label_bg = label[:, args.front_sample:]
+
+                if loss_type == 'bce':
+                    out_likeli_fg = np.array(torch.sigmoid(pred_fg).cpu().detach().numpy())
+                    out_likeli_bg = np.array(torch.sigmoid(pred_bg).cpu().detach().numpy())
+                else:
+                    out_likeli_fg = np.array(torch.nn.functional.softmax(pred_fg, dim=-1).cpu().detach().numpy())
+                    out_likeli_bg = np.array(torch.nn.functional.softmax(pred_bg, dim=-1).cpu().detach().numpy())
 
                 if loss_type == 'bce':
                     loss_fg = loss_bce(pred_fg[select_inds],  label_fg[select_inds].cpu())
