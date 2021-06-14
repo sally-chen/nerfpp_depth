@@ -92,12 +92,12 @@ class RaySamplerSingleImage(object):
         self.box_loc = box_loc
 
 
-        number = self.img_path[-9:-4]
-        self.label_path = self.img_path[:-13] + 'class_label/' + number
+
 
 
         if make_class_label:
-
+            number = self.img_path[-9:-4]
+            self.label_path = self.img_path[:-13] + 'class_label/' + number
             os.makedirs(self.img_path[:-13] + 'class_label/', exist_ok=True)
             self.get_classifier_label_torch(N_front_sample=128, N_back_sample=128, pretrain=True, save=True)
 
@@ -173,6 +173,8 @@ class RaySamplerSingleImage(object):
 
 
                 # to create depth segments for donerf need to normalze depthmap, so that when we so search sort everything is in normalied coordinates
+
+                self.depth_map_nonorm = depth_map
                 self.depth_map = self.depth_normalize(depth_map)
 
 
@@ -205,8 +207,8 @@ class RaySamplerSingleImage(object):
             return None
 
     def get_depth(self):
-        if self.depth_map is not None:
-            return self.depth_map.reshape((self.H, self.W))
+        if self.depth_map_nonorm is not None:
+            return self.depth_map_nonorm.reshape((self.H, self.W))
         else:
             return None
 
@@ -268,7 +270,7 @@ class RaySamplerSingleImage(object):
             ('fg_z_vals_centre', fg_z_vals_centre),
             ('fg_far_depth', self.depth_sphere),
 
-            ('depth_gt', self.depth_map),
+            ('depth_gt', self.depth_map_nonorm),
             ('rgb', self.img),
             ('mask', self.mask),
             ('min_depth', min_depth),
@@ -530,8 +532,8 @@ class RaySamplerSingleImage(object):
         else:
             rgb = None
 
-        if self.depth_map is not None:
-            depth_map = self.depth_map[select_inds]  # [N_rand, 3]
+        if self.depth_map_nonorm is not None:
+            depth_map = self.depth_map_nonorm[select_inds]  # [N_rand, 3]
         else:
             depth_map = None
 

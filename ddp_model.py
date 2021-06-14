@@ -269,14 +269,14 @@ class NerfNet(nn.Module):
         bg_depth_map = bg_lambda * bg_depth_map
         depth_map = fg_depth_map + bg_depth_map
 
-        # device = torch.cuda.device('cuda:0')
-        # max = torch.tensor([100., 140.], device=torch.device('cuda:0'))
-        # min = torch.tensor([85., 125.], device=torch.device('cuda:0'))
-        # avg_pose = torch.tensor([0.5,  0.5], device=torch.device('cuda:0'))
-        #
-        # depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (max-min) + min
-        # ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
-        # depth_map = torch.norm(depth_pt_denorm[:,:2] - ro_denorm, dim=1, keepdim=False)
+        device_num = torch.cuda.current_device()
+        max = torch.tensor([100., 140.]).to(device_num)
+        min = torch.tensor([85., 125.]).to(device_num)
+        avg_pose = torch.tensor([0.5,  0.5]).to(device_num)
+
+        depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (max-min) + min
+        ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
+        depth_map = torch.norm(depth_pt_denorm[:,:2] - ro_denorm, dim=1, keepdim=False)
 
         ret = OrderedDict([('rgb', rgb_map),  # loss
                            ('fg_weights', fg_weights),  # importance sampling
@@ -492,16 +492,15 @@ class NerfNetBox(nn.Module):
         ## combine foregroung and background in the right depth unit s well
 
         ## need inverse normalization
-        # device = torch.cuda.device('cuda:0')
-        #
-        # max = torch.tensor([100., 140.], device=torch.device('cuda:0'))
-        # min = torch.tensor([85., 125.], device=torch.device('cuda:0'))
-        # avg_pose = torch.tensor([0.5, 0.5], device=torch.device('cuda:0'))
-        #
-        # depth_pt_denorm = ((ray_o[:, :2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (
-        #             max - min) + min
-        # ro_denorm = ((ray_o[:, :2]) / 0.5 + avg_pose) * (max - min) + min
-        # depth_map = torch.norm(depth_pt_denorm[:, :2] - ro_denorm, dim=1, keepdim=False)
+        device_num = torch.cuda.current_device()
+
+        max = torch.tensor([100., 140.]).to(device_num)
+        min = torch.tensor([85., 125.]).to(device_num)
+        avg_pose = torch.tensor([0.5, 0.5]).to(device_num)
+
+        depth_pt_denorm = ((ray_o[:, :2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * ( max - min) + min
+        ro_denorm = ((ray_o[:, :2]) / 0.5 + avg_pose) * (max - min) + min
+        depth_map = torch.norm(depth_pt_denorm[:, :2] - ro_denorm, dim=1, keepdim=False)
         #
         # ##
         # ret = [rgb_map,fg_weights,bg_weights,fg_rgb_map,fg_depth_map,bg_rgb_map,bg_depth_map,bg_lambda,depth_map]
@@ -551,7 +550,7 @@ class NerfNetWithAutoExpo(nn.Module):
         :param fg_z_vals, bg_z_vals: [..., N_samples]
         :return
         '''
-        ret = self.nerf_net(ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals)
+        ret = self.nerf_net(ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals )
 
         if img_name is not None:
             img_name = remap_name(img_name)
