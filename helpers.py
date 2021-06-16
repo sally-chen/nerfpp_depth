@@ -108,16 +108,19 @@ def log_plot_conf_mat(writer, cm, step, name):
 def visualize_depth_label(writer, label, pred, step, name):
     fig = plt.figure(figsize=(15,8))
 
-    pos = [str(i) for i in range(label.shape[1])]
+    # pos = [str(i) for i in range(pred.shape[1])]
 
-    ax_label = fig.add_subplot(121)
-    pcm_label = ax_label.matshow(label)
-    ax_label.set_title("Depth Label")
-    # ax_label.set_xticklabels([''] + pos)
+    
+    if label is not None:
+        ax_label = fig.add_subplot(121)
+        pcm_label = ax_label.matshow(label)
+        ax_label.set_title("Depth Label")
+        # ax_label.set_xticklabels([''] + pos)
 
+        ax_pred = fig.add_subplot(122)
 
-
-    ax_pred = fig.add_subplot(122)
+    else:
+        ax_pred = fig.add_subplot(111)
     pcm_pred = ax_pred.matshow(pred)
     ax_pred.set_title("Depth Pred")
     # ax_pred.set_xticklabels([''] + pos)
@@ -126,7 +129,9 @@ def visualize_depth_label(writer, label, pred, step, name):
 
     # plt.title('Prob Distribution of Depth Label vs Prediction')
     # cax=plt.imshow()
-    plt.colorbar(pcm_label, ax=ax_label)
+
+    if label is not None:
+        plt.colorbar(pcm_label, ax=ax_label)
 
     plt.colorbar(pcm_pred, ax=ax_pred)
 
