@@ -175,7 +175,7 @@ class RaySamplerSingleImage(object):
                 # to create depth segments for donerf need to normalze depthmap, so that when we so search sort everything is in normalied coordinates
 
                 self.depth_map_nonorm = depth_map
-                self.depth_map = self.depth_normalize(depth_map)
+                # self.depth_map = self.depth_normalize(depth_map)
 
 
             else:
@@ -299,7 +299,7 @@ class RaySamplerSingleImage(object):
         depth_sphere = torch.from_numpy(self.depth_sphere).to(rank)
         rays_o = torch.from_numpy(self.rays_o).to(rank)
         rays_d = torch.from_numpy(self.rays_d).to(rank)
-        depth_map = torch.from_numpy(self.depth_map).to(rank)
+
 
 
         fg_far_depth = depth_sphere.to(rank)  # how far is the sphere to rayo [ H*W,]
@@ -347,6 +347,8 @@ class RaySamplerSingleImage(object):
         # bg_pts_flat = bg_pts.view(N_rays, -1)
 
         if pretrain and save:
+
+            depth_map = torch.from_numpy(self.depth_map).to(rank)
 
             _, bg_depth_real = depth2pts_outside(
                 rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),

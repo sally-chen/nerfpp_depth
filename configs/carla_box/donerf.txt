@@ -1,7 +1,7 @@
 ### INPUT
 datadir = /media/diskstation/sally/
 scene = big_inters_nom15_samp4x4_nobox
-expname = ce0.1entr_rgb
+expname = bce0.0001entr_rgb
 
 basedir = /home/sally/nerf_clone/nerfpp_depth/logs
 config = None
@@ -12,16 +12,16 @@ testskip = 1
 ### TRAINING
 N_iters = 1000001
 N_rand = 1024
-lrate = 0.0001
+lrate = 0.0005
 lrate_decay_factor = 0.1
 lrate_decay_steps = 5000
 
 ### CASCADE
 cascade_level = 1
-cascade_samples = 64
+cascade_samples = 128
 
 ### TESTING
-chunk_size = 1024
+chunk_size = 8192
 
 ### RENDERING
 det = False
@@ -32,7 +32,7 @@ netwidth = 256
 use_viewdirs = True
 
 ### CONSOLE AND TENSORBOARD
-i_img = 500
+i_img = 1000
 i_print = 50
 i_weights = 5000
 
