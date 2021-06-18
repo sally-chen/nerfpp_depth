@@ -91,13 +91,12 @@ class RaySamplerSingleImage(object):
 
         self.box_loc = box_loc
 
-
-
+        number = self.img_path[-9:-4]
+        self.label_path = self.img_path[:-13] + 'class_label/' + number
 
 
         if make_class_label:
-            number = self.img_path[-9:-4]
-            self.label_path = self.img_path[:-13] + 'class_label/' + number
+
             os.makedirs(self.img_path[:-13] + 'class_label/', exist_ok=True)
             self.get_classifier_label_torch(N_front_sample=128, N_back_sample=128, pretrain=True, save=True)
 
@@ -304,7 +303,7 @@ class RaySamplerSingleImage(object):
 
         fg_far_depth = depth_sphere.to(rank)  # how far is the sphere to rayo [ H*W,]
 
-        same_seg = False
+        same_seg = True
 
         if same_seg:
             fg_near_depth = fg_far_depth - 2.  # [H*W,]
@@ -487,7 +486,7 @@ class RaySamplerSingleImage(object):
                 cur_time = time.time()
             del cls_label_flat_filtered
 
-        return cls_label_flat_filtered_, None,None, bg_z_vals_centre, fg_z_vals_centre
+        return cls_label_flat_filtered_, None,None, bg_z_vals, fg_z_vals
 
 
 
