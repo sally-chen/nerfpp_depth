@@ -262,7 +262,7 @@ class NerfNet(nn.Module):
 
         # composite foreground and background
         bg_rgb_map = bg_lambda.unsqueeze(-1) * bg_rgb_map
-        bg_depth_map = bg_lambda * bg_depth_map
+        # bg_depth_map = bg_lambda * bg_depth_map
         rgb_map = fg_rgb_map + bg_rgb_map
 
         _, bg_depth_map = depth2pts_outside(ray_o, ray_d, bg_depth_map)
@@ -277,6 +277,7 @@ class NerfNet(nn.Module):
         depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (max-min) + min
         ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
         depth_map = torch.norm(depth_pt_denorm[:,:2] - ro_denorm, dim=1, keepdim=False)
+
 
         ret = OrderedDict([('rgb', rgb_map),  # loss
                            ('fg_weights', fg_weights),  # importance sampling
