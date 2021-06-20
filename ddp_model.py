@@ -44,7 +44,8 @@ def depth2pts_outside(ray_o, ray_d, depth):
 
     # now calculate conventional depth
     # torch.cos(theta) = pmid --> edge of sphere
-    depth_real = 1. / (depth + TINY_NUMBER) * torch.cos(theta) * ray_d_cos + d1
+    # depth_real = 1. / (depth + TINY_NUMBER) * torch.cos(theta) * ray_d_cos + d1
+    depth_real = 1. / (depth) * torch.cos(theta) * ray_d_cos + d1
     return pts, depth_real
 
 
@@ -266,8 +267,7 @@ class NerfNet(nn.Module):
         rgb_map = fg_rgb_map + bg_rgb_map
 
         _, bg_depth_map = depth2pts_outside(ray_o, ray_d, bg_depth_map)
-        bg_depth_map = bg_lambda * bg_depth_map
-        depth_map = fg_depth_map + bg_depth_map
+        depth_map = fg_depth_map + bg_lambda * bg_depth_map
 
         device_num = torch.cuda.current_device()
         max = torch.tensor([100., 140.]).to(device_num)

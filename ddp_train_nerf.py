@@ -41,6 +41,7 @@ def setup_logger():
     # create formatter
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 
+
     # add formatter to ch
     ch.setFormatter(formatter)
 
@@ -130,7 +131,7 @@ def sample_pdf(bins, weights, N_samples, det=False):
 def render_single_image(models, ray_sampler, chunk_size,
                         train_box_only=False, have_box=False,
                         donerf_pretrain=False, front_sample=128, back_sample=128,
-                        fg_bg_net=True, use_zval=True,loss_type='ce',rank=0):
+                        fg_bg_net=True, use_zval=True,loss_type='ce',rank=0, DEBUG=True):
     """
     Render an image using the NERF.
     :param models: Dictionary of networks used for the render.
@@ -145,6 +146,8 @@ def render_single_image(models, ray_sampler, chunk_size,
     :param use_zval: ??
     :return: Result dictionary from the last model in the chain of models.
     """
+
+
 
     rays = ray_sampler.get_all_classifier(front_sample,
                                           back_sample,
@@ -166,6 +169,15 @@ def render_single_image(models, ray_sampler, chunk_size,
     likelis_bg = []
 
 
+    if DEBUG:
+        depths_fg = []
+        depths_bg = []
+        rgbs_bg = []
+        rgbs_fg = []
+
+        depths_lamda = []
+
+
 
     for _rays in rays_split:
         chunk_ret = render_rays(models, _rays, train_box_only, have_box,
@@ -184,6 +196,14 @@ def render_single_image(models, ray_sampler, chunk_size,
             rgbs.append(chunk_ret['rgb'])
             depths.append(chunk_ret['depth_fgbg'])
 
+            if DEBUG:
+                rgbs_fg.append(chunk_ret['fg_rgb'])
+                rgbs_bg.append(chunk_ret['bg_rgb'])
+                depths_fg.append(chunk_ret['fg_depth'])
+                depths_bg.append(chunk_ret['bg_depth'])
+                depths_lamda.append(chunk_ret['bg_lambda'])
+
+
     if donerf_pretrain:
         likeli_fg = torch.cat(likelis_fg).view(ray_sampler.H * ray_sampler.W, -1).squeeze().cpu()
         likeli_bg = torch.cat(likelis_bg).view(ray_sampler.H * ray_sampler.W, -1).squeeze().cpu()
@@ -195,7 +215,24 @@ def render_single_image(models, ray_sampler, chunk_size,
         d = torch.cat(depths).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
         likeli_fg = torch.cat(likelis_fg).view(ray_sampler.H * ray_sampler.W, -1).squeeze().cpu()
         likeli_bg = torch.cat(likelis_bg).view(ray_sampler.H * ray_sampler.W, -1).squeeze().cpu()
-    return rgb, d, likeli_fg, likeli_bg, rays['cls_label']
+
+        # likeli_fg_sig = torch.sigmoid(likeli_fg).numpy()
+        # likeli_bg_sig = torch.sigmoid(likeli_bg).numpy()
+        if DEBUG:
+            rgb_fg = torch.cat(rgbs_fg).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+            d_fg = torch.cat(depths_fg).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+            rgb_bg = torch.cat(rgbs_bg).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+            d_bg = torch.cat(depths_bg).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+            d_lam = torch.cat(depths_lamda).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
+
+            others = {}
+            others['rgb_fg'] = rgb_fg
+            others['rgb_bg'] = rgb_bg
+            others['d_fg'] = d_fg
+            others['d_bg'] = d_bg
+            others['d_lam'] = d_lam
+            return rgb, d, likeli_fg, likeli_bg, rays['cls_label'], others
+    return rgb, d, likeli_fg, likeli_bg, rays['cls_label'], None
 
 def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sample):
     if fg_bg_net:
@@ -227,15 +264,23 @@ def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sampl
 def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
                bg_z_vals_centre, samples, box_weights=None, train_box_only=False, loss_type='ce'):
 
-    fg_depth_mid = fg_z_vals_centre
+
     fg_weights = data['likeli_fg'].clone() # Avoid inplace ops
+
+    bg_weights = data['likeli_bg'].clone()
+    #
+    # fg_z_vals_centre_np = fg_z_vals_centre.cpu().numpy()
+    # bg_z_vals_centre_np = bg_z_vals_centre.cpu().numpy()
+    #
+    # fg_weights_np = fg_weights.cpu().numpy()
+    # bg_weights_np = bg_weights.cpu().numpy()
 
     if loss_type is 'ce':
         fg_weights = F.softmax(fg_weights, dim=-1)[:, 1:front_sample-1]
         # fg_weights = normalize_torch(fg_weights)[:, 1:front_sample-1]
     else:
-        # fg_weights = fg_weights[:, 1:front_sample-1]+0.05
-        fg_weights = torch.sigmoid(fg_weights)[:, 1:front_sample-1]+0.05
+        fg_weights = fg_weights[:, 1:front_sample-1] +0.001
+        # fg_weights = torch.sigmoid(fg_weights)[:, 1:front_sample-1]+0.05
 
     if box_weights is not None:
         fg_weights = fg_weights + normalize_torch(box_weights[:, 1:])
@@ -243,16 +288,15 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
     fg_depth_mid = 0.5 * (fg_z_vals_centre[:, 1:] + fg_z_vals_centre[:, :-1])
     bg_depth_mid = 0.5 * (bg_z_vals_centre[:, 1:] + bg_z_vals_centre[:, :-1])
 
-    fg_weights[fg_depth_mid[:,:-1]<0.] =0.
+    fg_weights[fg_depth_mid[:,:-1]<0.0] =0.0
 
 
     fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights,
                           N_samples=samples, det=False))  # [..., N_samples]
-    fg_depth[fg_depth<0.] = 0.
+    fg_depth[fg_depth<0.0002] = 0.0002
 
+    # fg_depth_np = fg_depth.cpu().numpy()
 
-
-    bg_weights = data['likeli_bg'].clone()
 
     bg_weights = torch.fliplr(bg_weights)
 
@@ -260,12 +304,15 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         bg_weights = F.softmax(bg_weights, dim=-1)[:, 1:back_sample-1]
         # bg_weights = normalize_torch(bg_weights)[:, 1:back_sample-1]
     else:
-        # bg_weights = bg_weights[:, 1:back_sample-1]+0.05
-        bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]+0.05
+        bg_weights = bg_weights[:, 1:back_sample-1]+0.05
+        # bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]+0.05
 
 
     bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                           N_samples=samples, det=False))  # [..., N_samples]
+
+    # bg_depth_np = bg_depth.cpu().numpy()
+    # fg_depth_np = fg_depth.cpu().numpy()
 
     return fg_depth, bg_depth
 
@@ -287,17 +334,12 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
     use_label = False
 
+
     ret_or = eval_oracle(rays, net_oracle, fg_bg_net, use_zval, front_sample, back_sample)
 
     if use_label:
         ret_or['likeli_fg'] = rays['cls_label'][:,:front_sample]
         ret_or['likeli_bg'] = rays['cls_label'][:,front_sample:]
-
-
-
-
-
-
 
     if donerf_pretrain:
         return ret_or
@@ -519,7 +561,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 #         return None
 #
 #
-def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask, gt_depth=None, train_box_only= False, have_box=False, prefix=''):
+def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask, gt_depth=None, train_box_only= False, have_box=False, prefix='', DEBUG=False, others=None):
     rgb_im = img_HWC2CHW(torch.from_numpy(gt_img))
     writer.add_image(prefix + 'rgb_gt', rgb_im, global_step)
 
@@ -539,28 +581,29 @@ def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask
                                     mask=mask))
     writer.add_image(prefix + 'level_{0}/depth_fgbg', depth_im, global_step)
     #
+    if DEBUG:
 
-
-        # rgb_im = img_HWC2CHW(log_data[m]['fg_rgb'])
-        # rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
-        # writer.add_image(prefix + 'level_{}/fg_rgb'.format(m), rgb_im, global_step)
+        rgb_im = img_HWC2CHW(others['rgb_fg'])
+        rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
+        writer.add_image(prefix + 'level_{}/fg_rgb'.format(0), rgb_im, global_step)
         
-        # depth = log_data[m]['fg_depth']
-        # depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True,
-        #                                  mask=mask))
-        # writer.add_image(prefix + 'level_{}/fg_depth'.format(m), depth_im, global_step)
+        depth = others['d_fg']
+        depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True,
+                                         mask=mask))
+        writer.add_image(prefix + 'level_{}/fg_depth'.format(0), depth_im, global_step)
 
-       # rgb_im = img_HWC2CHW(log_data[m]['bg_rgb'])
-       # rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
-       # writer.add_image(prefix + 'level_{}/bg_rgb'.format(m), rgb_im, global_step)
-       #
-       # depth = log_data[m]['bg_depth']
-       # depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True, mask=mask))
-       # writer.add_image(prefix + 'level_{}/bg_depth'.format(m), depth_im, global_step)
-           #bg_lambda = log_data[m]['bg_lambda']
-           #bg_lambda_im = img_HWC2CHW(colorize(bg_lambda, cmap_name='hot', append_cbar=True,
-           #                                      mask=mask))
-           #writer.add_image(prefix + 'level_{}/bg_lambda'.format(m), bg_lambda_im, global_step)
+        rgb_im = img_HWC2CHW(others['rgb_bg'])
+        rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
+        writer.add_image(prefix + 'level_{}/bg_rgb'.format(0), rgb_im, global_step)
+
+        depth = others['d_bg']
+        depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True, mask=mask))
+        writer.add_image(prefix + 'level_{}/bg_depth'.format(0), depth_im, global_step)
+
+        bg_lambda = others['d_lam']
+        bg_lambda_im = img_HWC2CHW(colorize(bg_lambda, cmap_name='hot', append_cbar=True,
+                                            mask=mask))
+        writer.add_image(prefix + 'level_{}/bg_lambda'.format(0), bg_lambda_im, global_step)
 
 
 def create_nerf(rank, args):
@@ -738,7 +781,7 @@ def ddp_train_nerf(rank, args):
     ray_samplers = load_data_split(args.datadir, args.scene, split='train',
                                    try_load_min_depth=args.load_min_depth, have_box=args.have_box,
                                    train_depth=True)
-    val_ray_samplers = load_data_split(args.datadir, args.scene, split='validation_old',
+    val_ray_samplers = load_data_split(args.datadir, args.scene, split='test',
                                        try_load_min_depth=args.load_min_depth, skip=args.testskip, have_box=args.have_box,
                                        train_depth=True)
 
@@ -791,6 +834,8 @@ def ddp_train_nerf(rank, args):
 
         optim_oracle.zero_grad()
 
+        fg_mid = 0.5 * (ray_batch['fg_z_vals_centre'][:, 1:] + ray_batch['fg_z_vals_centre'][:, :-1])
+        bg_mid = 0.5 * (ray_batch['bg_z_vals_centre'][:, 1:] + ray_batch['bg_z_vals_centre'][:, :-1])
 
         if args.donerf_pretrain:
 
@@ -802,7 +847,7 @@ def ddp_train_nerf(rank, args):
                                      ray_batch['fg_far_depth'].float())
                 else:
                     ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-                                     ray_batch['fg_z_vals_centre'].float(), ray_batch['bg_z_vals_centre'].float(),\
+                                     fg_mid.float(), bg_mid.float(),\
                                      ray_batch['fg_far_depth'].float())
 
             else:
@@ -906,9 +951,6 @@ def ddp_train_nerf(rank, args):
                                          ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
                                          ray_batch['fg_far_depth'].float())
                     else:
-
-                        fg_mid = 0.5 * (ray_batch['fg_z_vals_centre'][:, 1:] + ray_batch['fg_z_vals_centre'][:, :-1])
-                        bg_mid = 0.5 * (ray_batch['bg_z_vals_centre'][:, 1:] + ray_batch['bg_z_vals_centre'][:, :-1])
 
                         ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
                                          fg_mid.float(), bg_mid.float(),
@@ -1022,7 +1064,7 @@ def ddp_train_nerf(rank, args):
                 writer.add_scalar(k, scalars_to_log[k], global_step)
             logger.info(logstr)
 
-        ## each process should do this; but only main process merges the results
+        # ## each process should do this; but only main process merges the results
         if global_step % args.i_img == 0 or global_step == start+1:
 
             # select_inds = np.random.choice(640*360, size=(200,), replace=False)
@@ -1036,10 +1078,10 @@ def ddp_train_nerf(rank, args):
             print('IMAGE_ID: {}'.format(idx))
 
             with torch.no_grad():
-                rgb, d, pred_fg, pred_bg, label  = render_single_image(models, val_ray_samplers[idx], args.chunk_size,
+                rgb, d, pred_fg, pred_bg, label, others  = render_single_image(models, val_ray_samplers[idx], args.chunk_size,
                                                args.train_box_only, have_box=args.have_box, donerf_pretrain=args.donerf_pretrain,
                                                front_sample=args.front_sample, back_sample=args.back_sample, fg_bg_net=args.fg_bg_net,
-                                               use_zval=args.use_zval,  loss_type=loss_type,  rank=rank)
+                                               use_zval=args.use_zval,  loss_type=loss_type,  rank=rank, DEBUG=True)
 
 
             what_val_to_log += 1
@@ -1158,7 +1200,7 @@ def ddp_train_nerf(rank, args):
                 #if args.depth_training:
                 log_view_to_tb(writer, global_step, rgb,d , gt_depth=val_ray_samplers[idx].get_depth(),
                                gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
-                               train_box_only=args.train_box_only, prefix='val/')
+                               train_box_only=args.train_box_only, prefix='val/',DEBUG=True, others=others)
                 if loss_type is 'ce':
                     visualize_depth_label(writer, np.array(label_fg[select_inds].cpu().detach().numpy()),
                                           F.softmax(pred_fg[select_inds], dim=-1), global_step, 'val/dVis_fg')
@@ -1167,153 +1209,153 @@ def ddp_train_nerf(rank, args):
 
                 else:
 
-                    visualize_depth_label(writer, None,
+                    visualize_depth_label(writer,None,
                                           torch.sigmoid(pred_fg[select_inds]), global_step, 'val/dVis_fg')
                     visualize_depth_label(writer, None,
                                           torch.sigmoid(pred_bg[select_inds]), global_step, 'val/dVis_bg')
                 #else:
                  #   log_view_to_tb(writer, global_step, log_data, gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
 
-            idx = what_train_to_log % len(ray_samplers)
-            print('IMAGE_ID-train: {}'.format(idx))
+            # idx = what_train_to_log % len(ray_samplers)
+            # print('IMAGE_ID-train: {}'.format(idx))
 
-            with torch.no_grad():
-                rgb, d, pred_fg, pred_bg, label = render_single_image(models, ray_samplers[idx], args.chunk_size,
-                                                      args.train_box_only, have_box=args.have_box,
-                                                      donerf_pretrain=args.donerf_pretrain,
-                                                      front_sample=args.front_sample, back_sample=args.back_sample,
-                                                      fg_bg_net=args.fg_bg_net, use_zval=args.use_zval,  loss_type=loss_type, rank=rank)
-
-            what_train_to_log += 1
-            dt = time.time() - time0
-
-            logger.info('Logged a random validation view in {} seconds'.format(dt))
-
-            if args.donerf_pretrain:
-                # if args.fg_bg_net:
-
-                label_fg = label[:, :args.front_sample]
-                label_bg = label[:, args.front_sample:]
-
-                if loss_type == 'bce':
-                    loss_fg = loss_bce(pred_fg[select_inds], label_fg[select_inds].cpu())
-                    loss_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds].cpu())
-                    scalars_to_log['train/bce_loss_fg'] = loss_fg.item()
-                    scalars_to_log['train/bce_loss_bg'] = loss_bg.item()
-
-                elif loss_type == 'ce':
-                    loss_fg = crossEntropy(label_fg[select_inds], pred_fg[select_inds])
-                    loss_bg = crossEntropy(label_bg[select_inds], pred_bg[select_inds])
-                    scalars_to_log['train/ce_loss_fg'] = loss_fg.item()
-                    scalars_to_log['train/ce_loss_bg'] = loss_bg.item()
-
-                elif loss_type == 'cebce':
-                    loss_b_fg = loss_bce(pred_fg[select_inds], label_fg[select_inds])
-                    loss_b_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds])
-                    scalars_to_log['train/bce_loss_fg'] = loss_b_fg.item()
-                    scalars_to_log['train/bce_loss_bg'] = loss_b_bg.item()
-
-                    loss_c_fg = crossEntropy(label_fg[select_inds], pred_fg[select_inds])
-                    loss_c_bg = crossEntropy(label_bg[select_inds], pred_bg[select_inds])
-                    scalars_to_log['train/ce_loss_fg'] = loss_c_fg.item()
-                    scalars_to_log['train/ce_loss_bg'] = loss_c_bg.item()
-
-                    loss_fg = loss_b_fg + loss_c_fg
-                    loss_bg = loss_b_bg + loss_c_bg
-
-                if add_entropy:
-                    loss_entr_fg = entropy_loss(pred_fg[select_inds].cpu())
-                    loss_entr_bg = entropy_loss(pred_bg[select_inds].cpu())
-                    scalars_to_log['train/entr_loss_fg'] = loss_entr_fg.item()
-                    scalars_to_log['train/entr_loss_bg'] = loss_entr_bg.item()
-
-
-                if add_entropy:
-                    loss_cls = (loss_fg + loss_bg) + 0.1 * (loss_entr_fg + loss_entr_bg)
-                    del loss_entr_fg
-                    del loss_entr_bg
-                else:
-                    loss_cls = (loss_fg + loss_bg)
-
-
-                scalars_to_log['train/loss'] = loss_cls.item()
-
-                del loss_fg
-                del loss_bg
-
-                if loss_type == 'bce':
-                    out_likeli_fg = np.array(torch.sigmoid(pred_fg).cpu().detach().numpy())
-                    out_likeli_bg = np.array(torch.sigmoid(pred_bg).cpu().detach().numpy())
-                else:
-                    out_likeli_fg = np.array(torch.nn.functional.softmax(pred_fg,dim=-1).cpu().detach().numpy())
-                    out_likeli_bg = np.array(torch.nn.functional.softmax(pred_bg,dim=-1).cpu().detach().numpy())
-                    #out_likeli_fg = np.array(normalize_torch(pred_fg).cpu().detach().numpy())
-                    #out_likeli_bg = np.array(normalize_torch(pred_bg).cpu().detach().numpy())
-
-
-                metrics_fg = calculate_metrics(out_likeli_fg, np.array(label_fg.cpu().detach().numpy()),
-                                               'micro')
-
-                for k in metrics_fg:
-                    scalars_to_log['train/' + k + '_fg'] = metrics_fg[k]
-
-
-                metrics_bg = calculate_metrics(out_likeli_bg, np.array(label_bg.cpu().detach().numpy()),
-                                               'micro')
-
-                for k in metrics_bg:
-                    scalars_to_log['train/' + k + '_bg'] = metrics_bg[k]
-
-                # log_plot_conf_mat(writer, metrics_bg['cm'], global_step, 'val/CM_bg')
-                visualize_depth_label(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
-                                      out_likeli_fg[select_inds], global_step, 'train/dVis_fg')
-                visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
-                                      out_likeli_bg[select_inds], global_step, 'train/dVis_bg')
-                #
-                # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
-                #                       out_likeli_fg[select_inds], global_step, 'train/LossVis_fg')
-                # loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
-                #                       out_likeli_bg[select_inds], global_step, 'train/LossVis_bg')
-
-
-                logstr = '[=VALID_TRAIN] {} step: {} '.format(args.expname, global_step)
-                for k in scalars_to_log:
-                    logstr += ' {}: {:.6f}'.format(k, scalars_to_log[k])
-                    writer.add_scalar(k, scalars_to_log[k], global_step)
-                logger.info(logstr)
-
-                del metrics_fg
-                del metrics_bg
-                del out_likeli_fg
-                del out_likeli_bg
-
-
-
-            else:
-
-                label_fg = label[:, :args.front_sample]
-                label_bg = label[:, args.front_sample:]
-
-                # if args.depth_training:
-                log_view_to_tb(writer, global_step, rgb,d, gt_depth=ray_samplers[idx].get_depth(),
-                               gt_img=ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
-                               train_box_only=args.train_box_only, prefix='train/')
-
-                if loss_type is 'ce':
-                    visualize_depth_label(writer, np.array(label_fg[select_inds].cpu().detach().numpy()),
-                                          F.softmax(pred_fg[select_inds], dim=-1), global_step, 'train/dVis_fg')
-                    visualize_depth_label(writer, np.array(label_bg[select_inds].cpu().detach().numpy()),
-                                          F.softmax(pred_bg[select_inds], dim=-1), global_step, 'train/dVis_bg')
-
-                else:
-
-                    visualize_depth_label(writer, np.array(label_fg[select_inds].cpu().detach().numpy()),
-                                          torch.sigmoid(pred_fg[select_inds]), global_step, 'train/dVis_fg')
-                    visualize_depth_label(writer, np.array(label_bg[select_inds].cpu().detach().numpy()),
-                                          torch.sigmoid(pred_bg[select_inds]), global_step, 'train/dVis_bg')
-
-
-
+        #     with torch.no_grad():
+        #         rgb, d, pred_fg, pred_bg, label,others = render_single_image(models, ray_samplers[8], args.chunk_size,
+        #                                               args.train_box_only, have_box=args.have_box,
+        #                                               donerf_pretrain=args.donerf_pretrain,
+        #                                               front_sample=args.front_sample, back_sample=args.back_sample,
+        #                                               fg_bg_net=args.fg_bg_net, use_zval=args.use_zval,  loss_type=loss_type, rank=rank, DEBUG=True)
+        #
+        #     what_train_to_log += 1
+        #     dt = time.time() - time0
+        #
+        #     logger.info('Logged a random validation view in {} seconds'.format(dt))
+        #
+        #     if args.donerf_pretrain:
+        #         # if args.fg_bg_net:
+        #
+        #         label_fg = label[:, :args.front_sample]
+        #         label_bg = label[:, args.front_sample:]
+        #
+        #         if loss_type == 'bce':
+        #             loss_fg = loss_bce(pred_fg[select_inds], label_fg[select_inds].cpu())
+        #             loss_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds].cpu())
+        #             scalars_to_log['train/bce_loss_fg'] = loss_fg.item()
+        #             scalars_to_log['train/bce_loss_bg'] = loss_bg.item()
+        #
+        #         elif loss_type == 'ce':
+        #             loss_fg = crossEntropy(label_fg[select_inds], pred_fg[select_inds])
+        #             loss_bg = crossEntropy(label_bg[select_inds], pred_bg[select_inds])
+        #             scalars_to_log['train/ce_loss_fg'] = loss_fg.item()
+        #             scalars_to_log['train/ce_loss_bg'] = loss_bg.item()
+        #
+        #         elif loss_type == 'cebce':
+        #             loss_b_fg = loss_bce(pred_fg[select_inds], label_fg[select_inds])
+        #             loss_b_bg = loss_bce(pred_bg[select_inds], label_bg[select_inds])
+        #             scalars_to_log['train/bce_loss_fg'] = loss_b_fg.item()
+        #             scalars_to_log['train/bce_loss_bg'] = loss_b_bg.item()
+        #
+        #             loss_c_fg = crossEntropy(label_fg[select_inds], pred_fg[select_inds])
+        #             loss_c_bg = crossEntropy(label_bg[select_inds], pred_bg[select_inds])
+        #             scalars_to_log['train/ce_loss_fg'] = loss_c_fg.item()
+        #             scalars_to_log['train/ce_loss_bg'] = loss_c_bg.item()
+        #
+        #             loss_fg = loss_b_fg + loss_c_fg
+        #             loss_bg = loss_b_bg + loss_c_bg
+        #
+        #         if add_entropy:
+        #             loss_entr_fg = entropy_loss(pred_fg[select_inds].cpu())
+        #             loss_entr_bg = entropy_loss(pred_bg[select_inds].cpu())
+        #             scalars_to_log['train/entr_loss_fg'] = loss_entr_fg.item()
+        #             scalars_to_log['train/entr_loss_bg'] = loss_entr_bg.item()
+        #
+        #
+        #         if add_entropy:
+        #             loss_cls = (loss_fg + loss_bg) + 0.1 * (loss_entr_fg + loss_entr_bg)
+        #             del loss_entr_fg
+        #             del loss_entr_bg
+        #         else:
+        #             loss_cls = (loss_fg + loss_bg)
+        #
+        #
+        #         scalars_to_log['train/loss'] = loss_cls.item()
+        #
+        #         del loss_fg
+        #         del loss_bg
+        #
+        #         if loss_type == 'bce':
+        #             out_likeli_fg = np.array(torch.sigmoid(pred_fg).cpu().detach().numpy())
+        #             out_likeli_bg = np.array(torch.sigmoid(pred_bg).cpu().detach().numpy())
+        #         else:
+        #             out_likeli_fg = np.array(torch.nn.functional.softmax(pred_fg,dim=-1).cpu().detach().numpy())
+        #             out_likeli_bg = np.array(torch.nn.functional.softmax(pred_bg,dim=-1).cpu().detach().numpy())
+        #             #out_likeli_fg = np.array(normalize_torch(pred_fg).cpu().detach().numpy())
+        #             #out_likeli_bg = np.array(normalize_torch(pred_bg).cpu().detach().numpy())
+        #
+        #
+        #         metrics_fg = calculate_metrics(out_likeli_fg, np.array(label_fg.cpu().detach().numpy()),
+        #                                        'micro')
+        #
+        #         for k in metrics_fg:
+        #             scalars_to_log['train/' + k + '_fg'] = metrics_fg[k]
+        #
+        #
+        #         metrics_bg = calculate_metrics(out_likeli_bg, np.array(label_bg.cpu().detach().numpy()),
+        #                                        'micro')
+        #
+        #         for k in metrics_bg:
+        #             scalars_to_log['train/' + k + '_bg'] = metrics_bg[k]
+        #
+        #         # log_plot_conf_mat(writer, metrics_bg['cm'], global_step, 'val/CM_bg')
+        #         visualize_depth_label(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
+        #                               out_likeli_fg[select_inds], global_step, 'train/dVis_fg')
+        #         visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
+        #                               out_likeli_bg[select_inds], global_step, 'train/dVis_bg')
+        #         #
+        #         # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
+        #         #                       out_likeli_fg[select_inds], global_step, 'train/LossVis_fg')
+        #         # loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
+        #         #                       out_likeli_bg[select_inds], global_step, 'train/LossVis_bg')
+        #
+        #
+        #         logstr = '[=VALID_TRAIN] {} step: {} '.format(args.expname, global_step)
+        #         for k in scalars_to_log:
+        #             logstr += ' {}: {:.6f}'.format(k, scalars_to_log[k])
+        #             writer.add_scalar(k, scalars_to_log[k], global_step)
+        #         logger.info(logstr)
+        #
+        #         del metrics_fg
+        #         del metrics_bg
+        #         del out_likeli_fg
+        #         del out_likeli_bg
+        #
+        #
+        #
+        #     else:
+        #
+        #         label_fg = label[:, :args.front_sample]
+        #         label_bg = label[:, args.front_sample:]
+        #
+        #         # if args.depth_training:
+        #         log_view_to_tb(writer, global_step, rgb,d, gt_depth=ray_samplers[idx].get_depth(),
+        #                        gt_img=ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
+        #                        train_box_only=args.train_box_only, prefix='train/', DEBUG=True, others=others)
+        #
+        #         if loss_type is 'ce':
+        #             visualize_depth_label(writer, np.array(label_fg[select_inds].cpu().detach().numpy()),
+        #                                   F.softmax(pred_fg[select_inds], dim=-1), global_step, 'train/dVis_fg')
+        #             visualize_depth_label(writer, np.array(label_bg[select_inds].cpu().detach().numpy()),
+        #                                   F.softmax(pred_bg[select_inds], dim=-1), global_step, 'train/dVis_bg')
+        #
+        #         else:
+        #
+        #             visualize_depth_label(writer, np.array(label_fg[select_inds].cpu().detach().numpy()),
+        #                                   torch.sigmoid(pred_fg[select_inds]), global_step, 'train/dVis_fg')
+        #             visualize_depth_label(writer, np.array(label_bg[select_inds].cpu().detach().numpy()),
+        #                                   torch.sigmoid(pred_bg[select_inds]), global_step, 'train/dVis_bg')
+        #
+        #
+        #
             torch.cuda.empty_cache()
 
         if (global_step % args.i_weights == 0 and global_step > 0):

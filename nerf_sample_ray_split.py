@@ -25,6 +25,9 @@ def intersect_sphere(ray_o, ray_d):
     p = ray_o + d1[...,None] * ray_d
     # consider the case where the ray does not intersect the sphere
     ray_d_cos = 1. / np.linalg.norm(ray_d, axis=-1)
+
+    p_sum = np.sum(p * p, axis=-1)
+
     d2 = np.sqrt(1. - np.sum(p * p, axis=-1)) * ray_d_cos
 
     return d1 + d2
@@ -92,12 +95,14 @@ class RaySamplerSingleImage(object):
         self.box_loc = box_loc
 
         number = self.img_path[-9:-4]
-        self.label_path = self.img_path[:-13] + 'class_label/' + number
+        self.label_path = self.img_path[:-13] + 'class_label_sameseg/' + number
+        # self.label_path = '/home/sally/data/' + 'class_label_sameseg/' + number
 
 
         if make_class_label:
 
-            os.makedirs(self.img_path[:-13] + 'class_label/', exist_ok=True)
+            # os.makedirs('/home/sally/data/' + 'class_label_sameseg/', exist_ok=True)
+            os.makedirs(self.img_path[:-13] + 'class_label_sameseg/', exist_ok=True)
             self.get_classifier_label_torch(N_front_sample=128, N_back_sample=128, pretrain=True, save=True)
 
 
@@ -168,13 +173,16 @@ class RaySamplerSingleImage(object):
                     # visualize_depth = False
 
 
+                # tmp = cv2.GaussianBlur(tmp, (9,9), 0 )
                 depth_map = tmp.reshape((-1))
 
 
                 # to create depth segments for donerf need to normalze depthmap, so that when we so search sort everything is in normalied coordinates
 
-                self.depth_map_nonorm = depth_map
-                # self.depth_map = self.depth_normalize(depth_map)
+                self.depth_map_nonorm = None
+
+
+                self.depth_map = self.depth_normalize(depth_map)
 
 
             else:
@@ -263,8 +271,8 @@ class RaySamplerSingleImage(object):
             ('ray_o', self.rays_o),
             ('ray_d', self.rays_d),
             ('cls_label', cls_label_filtered),
-            ('fg_pts_flat', None),
-            ('bg_pts_flat', None),
+            ('fg_pts_flat', fg_pts_flat),
+            ('bg_pts_flat', bg_pts_flat),
             ('bg_z_vals_centre', bg_z_vals_centre),
             ('fg_z_vals_centre', fg_z_vals_centre),
             ('fg_far_depth', self.depth_sphere),
@@ -320,13 +328,10 @@ class RaySamplerSingleImage(object):
 
         fg_z_vals_centre = step.unsqueeze(-1) / 2. + fg_z_vals
         fg_z_vals_centre = fg_z_vals_centre[:, :-1]
-
-        # slice till last sample as wel are taking the mid points
-        # fg_pts = rays_o.unsqueeze(-2) + fg_z_vals_centre.unsqueeze(-1) * rays_d.unsqueeze(-2)  # [H*W, N_samples, 3]
+        fg_pts = rays_o.unsqueeze(-2) + fg_z_vals_centre.unsqueeze(-1) * rays_d.unsqueeze(-2)  # [H*W, N_samples, 3]
 
         bg_z_vals = torch.linspace(0., 1., N_back_sample).to(rank)
         step = bg_z_vals[1] - bg_z_vals[0]
-
         bg_z_vals_centre = bg_z_vals[:-1] + step / 2.
 
         bg_z_vals = bg_z_vals.view(
@@ -334,18 +339,22 @@ class RaySamplerSingleImage(object):
         bg_z_vals_centre = bg_z_vals_centre.view(
             [1, ]  + [N_back_sample - 1, ]).expand([N_rays] + [N_back_sample - 1, ])  # [H*W, N_samples]
 
-
-
+        bg_pts, _ = depth2pts_outside(
+            rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample - 1, 3]),
+            rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample - 1, 3]),
+            bg_z_vals_centre)  # [H*W, N_samples, 4],  # [H*W, N_samples]
 
         if time_program:
             cur_time_sp = time.time() - cur_time
             print('[TIME] get segs {}'.format(cur_time_sp))
             cur_time = time.time()
 
-        # fg_pts_flat = fg_pts.view(N_rays, -1)
-        # bg_pts_flat = bg_pts.view(N_rays, -1)
+        fg_pts_flat = fg_pts.view(N_rays, -1)
+        bg_pts_flat = torch.flip(bg_pts, dims=[1,]).view(N_rays, -1)
 
         if pretrain and save:
+
+        # if True:
 
             depth_map = torch.from_numpy(self.depth_map).to(rank)
 
@@ -353,15 +362,20 @@ class RaySamplerSingleImage(object):
                 rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),
                 rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample, 3]),
                 bg_z_vals)  # [H*W, N_samples, 4],  # [H*W, N_samples]
-            # bg_pts, _ = depth2pts_outside(\
-            #     rays_o.unsqueeze(-2).expand([N_rays] + [N_back_sample-1, 3]), rays_d.unsqueeze(-2).expand([N_rays] + [N_back_sample-1, 3]),bg_z_vals_centre)  # [H*W, N_samples, 4],  # [H*W, N_samples]
+
+
 
             # flip left and right
             # bg_pts, bg_depth_real = torch.flip(bg_pts, dims=[1,]), torch.fliplr(bg_depth_real)
             bg_depth_real = torch.fliplr(bg_depth_real)
 
+
+            # bg_depth_real_np = bg_depth_real.cpu().numpy()
+            # fg_z_vals_np = fg_z_vals.cpu().numpy()
+
             # if pretrain:
             bg_depth_real[:, 0] = fg_z_vals[:, -1]  # there can be potential mismatches
+
 
             # they are both distance to camera
             depth_segs = torch.cat([fg_z_vals, bg_depth_real], dim=-1)  # [H*W, numseg]
@@ -450,10 +464,10 @@ class RaySamplerSingleImage(object):
                 print('[TIME] depth filter {}'.format(cur_time_sp))
 
             zarr.save(self.label_path+'.zarr', cls_label_flat_filtered.detach().cpu().numpy())
-            # np.savez_compressed(self.label_path, cls_label_flat_filtered.detach().cpu().numpy())
-            # np.savez(self.label_path, cls_label_flat_filtered.detach().cpu().numpy())
 
             return
+            # cls_label_flat_filtered_ = cls_label_flat_filtered
+
 
 
         elif pretrain is False:
@@ -486,7 +500,7 @@ class RaySamplerSingleImage(object):
                 cur_time = time.time()
             del cls_label_flat_filtered
 
-        return cls_label_flat_filtered_, None,None, bg_z_vals, fg_z_vals
+        return cls_label_flat_filtered_, fg_pts_flat, bg_pts_flat, bg_z_vals, fg_z_vals
 
 
 
@@ -507,8 +521,8 @@ class RaySamplerSingleImage(object):
 
 
 
-        # fg_pts_flat = fg_pts_flat[select_inds]
-        # bg_pts_flat = bg_pts_flat[select_inds]
+        fg_pts_flat = fg_pts_flat[select_inds]
+        bg_pts_flat = bg_pts_flat[select_inds]
 
         bg_z_vals_centre = bg_z_vals_centre[select_inds]
         fg_z_vals_centre = fg_z_vals_centre[select_inds]
@@ -552,8 +566,8 @@ class RaySamplerSingleImage(object):
             ('ray_o', rays_o),
             ('ray_d', rays_d),
             ('cls_label', cls_label_filtered),
-            ('fg_pts_flat', None),
-            ('bg_pts_flat', None),
+            ('fg_pts_flat', fg_pts_flat),
+            ('bg_pts_flat', bg_pts_flat),
             ('bg_z_vals_centre', bg_z_vals_centre),
             ('fg_z_vals_centre', fg_z_vals_centre),
             ('fg_far_depth', depth_sph),
