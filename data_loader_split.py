@@ -91,6 +91,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         nums = open(filename).read().split()
         nums = np.array([float(x) for x in nums])
 
+        nums = nums.reshape(10, 2)
         if norm:
             max = np.array([100,140])
             min = np.array([85, 125])
@@ -100,11 +101,12 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
             nums /= (max-min)
             nums -= avg_pos
             nums *= 0.5
-
-        nums_new = np.zeros([3])
+        nums_new = np.zeros([10, 3])
         # nums_new[:2] = nums + random.randint(-20,20)/100.
-        nums_new[:2] = nums
-        nums_new[2] = -1
+        nums_new[:, :2] = nums
+        nums_new[:, 2] = -1
+        nums_new = nums_new.reshape(30)
+        # import pdb; pdb.set_trace()
         return nums_new.astype(np.float32)
 
     if have_box:
@@ -213,16 +215,17 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     logger.info('Split {}, # views: {}'.format(split, cam_cnt))
 
     #
-    if not have_box:
-        plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
-                        ['scene poses'])
+    # TODO: commented for debugging.
+    # if not have_box:
+    #     plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
+    #                     ['scene poses'])
     
-    else:
-        dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
-        locs = np.stack(locs, axis=0)
-        dummy_pose_loc[:,:3, 3] = locs
-        plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
-                       ['scene poses','box'])
+    # else:
+    #     dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
+    #     locs = np.stack(locs, axis=0)
+    #     dummy_pose_loc[:,:3, 3] = locs
+    #     plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
+    #                    ['scene poses','box'])
     #
     #
     # ## denorm first and save for test ##

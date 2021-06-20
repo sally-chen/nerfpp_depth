@@ -427,9 +427,22 @@ def create_nerf_noddp(args):
         logger.info('Reloading from: {}'.format(fpath))
         to_load = torch.load(fpath)
 
+        # TODO: ====
+        # Add extra name module.*
         for m in range(models['cascade_level']):
+            # name: net_0 net_1 optim_0 optim_1
+            new_dict = dict()
+            for k, v in to_load['net_{}'.format(m)].items():
+                new_dict['module.' + k] = v
+            to_load['net_{}'.format(m)] = new_dict
+                
+            
+        # ========================
+
+        for m in range(models['cascade_level']):
+            # name: net_0 net_1 optim_0 optim_1
             for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-                models[name].load_state_dict(to_load[name])
+                # models[name].load_state_dict(to_load[name])
                 if name.startswith('net'):
                     models[name].to(torch.cuda.current_device())
 
@@ -590,6 +603,9 @@ def ddp_train_nerf(rank, args):
         args.N_rand = 512
         args.chunk_size = 4096
 
+    args.N_rand = 512
+    args.chunk_size = 2048
+
     ###### Create log dir and copy the config file
 
     os.makedirs(os.path.join(args.basedir, args.expname), exist_ok=True)
@@ -620,7 +636,6 @@ def ddp_train_nerf(rank, args):
     # make sure different processes have different perturbations in depth samples
     torch.manual_seed((rank + 1) * 777)
 
-
     writer = SummaryWriter(os.path.join(args.basedir, 'summaries', args.expname))
         
     # start training
@@ -645,6 +660,17 @@ def ddp_train_nerf(rank, args):
         for m in range(models['cascade_level']):
             optim = models['optim_{}'.format(m)]
             net = models['net_{}'.format(m)]
+
+            # TODO: remove.
+            # for parameter in net.parameters():
+            #     parameter.requires_grad = False
+
+            # for parameter in net.module.nerf_net.box_net.parameters():
+            #     parameter.requires_grad = True
+
+            # for parameter in net.module.nerf_net.fg_net.parameters():
+            #     parameter.requires_grad - True
+            # ====
 
             # sample depths
             N_samples = models['cascade_samples'][m]
@@ -778,7 +804,8 @@ def ddp_train_nerf(rank, args):
 
 
     # clean up for multi-processing
-    cleanup()
+    # TODO
+    # cleanup()
 
 
 def config_parser():
@@ -862,12 +889,13 @@ def train():
     args = parser.parse_args()
     logger.info(parser.format_values())
 
-
+    torch.cuda.set_device(2)
+    print(torch.cuda.get_device_name(torch.cuda.current_device()))
     ddp_train_nerf(rank=torch.cuda.current_device(), args=args)
 
 
 if __name__ == '__main__':
     setup_logger()
-    train()
+train()
 
 
