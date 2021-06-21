@@ -12,7 +12,7 @@ import time
 from data_loader_split import load_data_split
 from utils import mse2psnr, colorize_np, to8b
 import imageio
-from ddp_train_nerf import config_parser, setup_logger, setup, cleanup, render_single_image, create_nerf
+from ddp_train_nerf import config_parser, setup_logger, render_single_image, create_nerf
 import logging
 
 
@@ -20,21 +20,11 @@ logger = logging.getLogger(__package__)
 
 
 def ddp_test_nerf(rank, args):
-    ###### set up multi-processing
-    setup(rank, args.world_size)
+
     ###### set up logger
     logger = logging.getLogger(__package__)
     setup_logger()
 
-    ###### decide chunk size according to gpu memory
-    if torch.cuda.get_device_properties(rank).total_memory / 1e9 > 14:
-        logger.info('setting batch size according to 24G gpu')
-        args.N_rand = 1024
-        args.chunk_size = 8192
-    else:
-        logger.info('setting batch size according to 12G gpu')
-        args.N_rand = 512
-        args.chunk_size = 4096
 
     ###### create network and wrap in ddp; each process should do this
     start, models = create_nerf(rank, args)
@@ -67,18 +57,22 @@ def ddp_test_nerf(rank, args):
                 continue
 
             time0 = time.time()
-            ret, _ = render_single_image(rank, args.world_size, models, ray_samplers[idx], args.chunk_size, \
-                                                  args.train_box_only, have_box=args.have_box,
-                                                  donerf_pretrain=args.donerf_pretrain, \
-                                                  front_sample=args.front_sample, back_sample=args.back_sample,
-                                                  fg_bg_net=args.fg_bg_net, use_zval=args.use_zval)
+            rgb, d, pred_fg, pred_bg, label, others = render_single_image(models, ray_samplers[idx],
+                                                                          args.chunk_size,
+                                                                          args.train_box_only, have_box=args.have_box,
+                                                                          donerf_pretrain=args.donerf_pretrain,
+                                                                          front_sample=args.front_sample,
+                                                                          back_sample=args.back_sample,
+                                                                          fg_bg_net=args.fg_bg_net,
+                                                                          use_zval=args.use_zval, loss_type='bce',
+                                                                          rank=rank, DEBUG=True)
             dt = time.time() - time0
             if rank == 0:    # only main process should do this
                 logger.info('Rendered {} in {} seconds'.format(fname, dt))
 
 
                 # only save last level
-                im = ret[-1]['rgb'].numpy()
+                im = rgb.numpy()
                 # compute psnr if ground-truth is available
                 if ray_samplers[idx].img_path is not None:
                     gt_im = ray_samplers[idx].get_img()
@@ -88,13 +82,13 @@ def ddp_test_nerf(rank, args):
                 im = to8b(im)
                 imageio.imwrite(os.path.join(out_dir, fname), im)
 
-                im = ret[-1]['fg_rgb'].numpy()
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, 'fg_' + fname), im)
-
-                im = ret[-1]['bg_rgb'].numpy()
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, 'bg_' + fname), im)
+                # im = ret[-1]['fg_rgb'].numpy()
+                # im = to8b(im)
+                # imageio.imwrite(os.path.join(out_dir, 'fg_' + fname), im)
+                #
+                # im = ret[-1]['bg_rgb'].numpy()
+                # im = to8b(im)
+                # imageio.imwrite(os.path.join(out_dir, 'bg_' + fname), im)
 
                 # im = ret[-1]['fg_depth'].numpy()
                 # im = colorize_np(im, cmap_name='jet', append_cbar=True)
@@ -106,25 +100,24 @@ def ddp_test_nerf(rank, args):
                 # im = to8b(im)
                 # imageio.imwrite(os.path.join(out_dir, 'bg_depth_' + fname), im)
 
-                # depth_clip=100.
-                # im = ret[-1]['depth_fgbg'].numpy()
-                # im[im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
-                #
-                # im = colorize_np(im, cmap_name='jet', append_cbar=True)
-                # im = to8b(im)
-                # imageio.imwrite(os.path.join(out_dir, 'Depth_' + fname), im)
-                #
-                # im = ray_samplers[idx].get_depth()
-                # im[im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
-                #
-                # im = colorize_np(im, cmap_name='jet', append_cbar=True)
-                # im = to8b(im)
-                # imageio.imwrite(os.path.join(out_dir, 'DepthGT_' + fname), im)
+                depth_clip=100.
+                im = d['depth_fgbg'].numpy()
+                im[im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
+
+                im = colorize_np(im, cmap_name='jet', append_cbar=True)
+                im = to8b(im)
+                imageio.imwrite(os.path.join(out_dir, 'Depth_' + fname), im)
+
+                im = ray_samplers[idx].get_depth()
+                im[im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
+
+                im = colorize_np(im, cmap_name='jet', append_cbar=True)
+                im = to8b(im)
+                imageio.imwrite(os.path.join(out_dir, 'DepthGT_' + fname), im)
 
             torch.cuda.empty_cache()
 
-    # clean up for multi-processing
-    cleanup()
+
 
 
 def test():
@@ -132,13 +125,7 @@ def test():
     args = parser.parse_args()
     logger.info(parser.format_values())
 
-    if args.world_size == -1:
-        args.world_size = torch.cuda.device_count()
-        logger.info('Using # gpus: {}'.format(args.world_size))
-    torch.multiprocessing.spawn(ddp_test_nerf,
-                                args=(args,),
-                                nprocs=args.world_size,
-                                join=True)
+    ddp_test_nerf(0, args)
 
 
 if __name__ == '__main__':
