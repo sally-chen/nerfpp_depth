@@ -181,10 +181,10 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     intrins = []
     locs = []
 
-    # tmp ##
-    if cam_cnt > 16:
-        cam_cnt = 16
-    ## tmp ##
+    # # tmp ##
+    # if cam_cnt > 16:
+    #     cam_cnt = 16
+    # ## tmp ##
 
     max = np.array([100., 140.])
     min = np.array([85., 125.])

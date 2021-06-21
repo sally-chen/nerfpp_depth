@@ -282,7 +282,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         # fg_weights = normalize_torch(fg_weights)[:, 1:front_sample-1]
     else:
         # fg_weights = fg_weights[:, 1:front_sample-1] +0.001
-        fg_weights = torch.sigmoid(fg_weights)+0.01
+        fg_weights = torch.sigmoid(fg_weights) + 0.05
 
     fg_weights[fg_z_vals_centre < 0.0002] = 0.0
     if box_weights is not None:
@@ -313,7 +313,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         # bg_weights = normalize_torch(bg_weights)[:, 1:back_sample-1]
     else:
         # bg_weights = bg_weights[:, 1:back_sample-1]+0.05
-        bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]+0.01
+        bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]+0.05
 
 
     bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
@@ -629,8 +629,8 @@ def create_nerf(rank, args):
     models = OrderedDict()
     models['cascade_level'] = 1
     models['cascade_samples'] = [int(x.strip()) for x in args.cascade_samples.split(',')]
-    if args.fg_bg_net:
-        ora_net = DepthOracle(args).to(rank)
+
+    ora_net = DepthOracle(args).to(rank)
     # else:
     #     ora_net = DepthOracleBig(args).to(rank)
     models['net_oracle'] = WrapperModule(ora_net)
@@ -703,13 +703,13 @@ def create_nerf(rank, args):
         #
         # models['net_0'].load_state_dict(to_load['net_0'])
 
-        fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
-        to_load_sc = torch.load(fpath_sc, map_location=map_location)
-
-        for k in to_load['net_0'].keys():
-            to_load['net_0'][k] = to_load_sc['net_1'][k]
-
-        models['net_0'].load_state_dict(to_load['net_0'])
+        # fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
+        # to_load_sc = torch.load(fpath_sc, map_location=map_location)
+        #
+        # for k in to_load['net_0'].keys():
+        #     to_load['net_0'][k] = to_load_sc['net_1'][k]
+        #
+        # models['net_0'].load_state_dict(to_load['net_0'])
 
     elif not args.have_box:
 
@@ -717,7 +717,7 @@ def create_nerf(rank, args):
 
         map_location = 'cuda:%d' % rank
 
-        fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/fgbg_pts/model_260000.pth"
+        fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/fgbg_pts/model_280000.pth"
 
         to_load_dep = torch.load(fpath_dep, map_location=map_location)
 
