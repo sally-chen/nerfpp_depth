@@ -274,7 +274,7 @@ class NerfNet(nn.Module):
         min = torch.tensor([85., 125.]).to(device_num)
         avg_pose = torch.tensor([0.5,  0.5]).to(device_num)
 
-        depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * (max-min) + min
+        depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * ray_d[:, :2]) / 0.5 + avg_pose) * (max-min) + min
         ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
         depth_map = torch.norm(depth_pt_denorm[:,:2] - ro_denorm, dim=1, keepdim=False)
 

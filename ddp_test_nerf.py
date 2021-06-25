@@ -26,7 +26,7 @@ def ddp_test_nerf(rank, args):
     setup_logger()
 
 
-    ###### create network and wrap in ddp; each process should do this
+
     start, models = create_nerf(rank, args)
 
     render_splits = [x.strip() for x in args.render_splits.strip().split(',')]

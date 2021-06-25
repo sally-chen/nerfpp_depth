@@ -195,13 +195,17 @@ class RaySamplerSingleImage(object):
         min = np.array([85., 125.])
         avg_pose = np.array([0.5, 0.5])
 
+        ray_d_norm = np.linalg.norm(self.rays_d, axis=-1, keepdims=True)  # [..., 1]
+        viewdirs = self.rays_d / ray_d_norm  # [..., 3]
+
         ro_denorm = ((self.rays_o[:, :2]) / 0.5 + avg_pose) * (max - min) + min # ray o to real
-        depth_real = ro_denorm + depth_map[:, None] * self.rays_d[:, :2] # get obj depth in real
+        depth_real = ro_denorm + depth_map[:, None] * viewdirs[:, :2] # get obj depth in real
         depth_real_norm = ((depth_real - min) / (max - min) - avg_pose) * 0.5 # get obj depth in norm
         depth_map_norm = np.linalg.norm(depth_real_norm[:, :2] - self.rays_o[:, :2], axis=-1, keepdims=False) # get depth map in norm
 
+        ray_d_cos = 1. / np.linalg.norm(self.rays_d, axis=-1, keepdims=False)
 
-        return depth_map_norm
+        return depth_map_norm * ray_d_cos
 
 
 
@@ -352,9 +356,9 @@ class RaySamplerSingleImage(object):
         fg_pts_flat = fg_pts.view(N_rays, -1)
         bg_pts_flat = torch.flip(bg_pts, dims=[1,]).view(N_rays, -1)
 
-        if pretrain and save:
+        # if pretrain and save:
 
-        # if True:
+        if True:
 
             depth_map = torch.from_numpy(self.depth_map).to(rank)
 
@@ -463,10 +467,10 @@ class RaySamplerSingleImage(object):
                 cur_time_sp = time.time() - cur_time
                 print('[TIME] depth filter {}'.format(cur_time_sp))
 
-            zarr.save(self.label_path+'.zarr', cls_label_flat_filtered.detach().cpu().numpy())
-
-            return
-            # cls_label_flat_filtered_ = cls_label_flat_filtered
+            # zarr.save(self.label_path+'.zarr', cls_label_flat_filtered.detach().cpu().numpy())
+            #
+            # return
+            cls_label_flat_filtered_ = cls_label_flat_filtered
 
 
 

@@ -282,7 +282,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         # fg_weights = normalize_torch(fg_weights)[:, 1:front_sample-1]
     else:
         # fg_weights = fg_weights[:, 1:front_sample-1] +0.001
-        fg_weights = torch.sigmoid(fg_weights) + 0.05
+        fg_weights = torch.sigmoid(fg_weights)
 
     fg_weights[fg_z_vals_centre < 0.0002] = 0.0
     if box_weights is not None:
@@ -313,7 +313,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         # bg_weights = normalize_torch(bg_weights)[:, 1:back_sample-1]
     else:
         # bg_weights = bg_weights[:, 1:back_sample-1]+0.05
-        bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]+0.05
+        bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]
 
 
     bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
@@ -340,7 +340,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
     net_oracle = models['net_oracle']
 
 
-    use_label = False
+    use_label = True
 
 
     ret_or = eval_oracle(rays, net_oracle, fg_bg_net, use_zval, front_sample, back_sample)
@@ -693,8 +693,8 @@ def create_nerf(rank, args):
             for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
                  models[name].load_state_dict(to_load[name])
         ####################################################################################333
-         #### tmp for reloading pretrained model
-        # fpath_sc = "./logs/pretrained/scene/model_425000.pth"
+         #### tmp for reloading pretrained model`
+        # fpath_sc = "./logs/pretrained/scene/model_425000.`pth"
         #
         # to_load_sc = torch.load(fpath_sc, map_location=map_location)
         #
@@ -703,13 +703,13 @@ def create_nerf(rank, args):
         #
         # models['net_0'].load_state_dict(to_load['net_0'])
 
-        # fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
-        # to_load_sc = torch.load(fpath_sc, map_location=map_location)
-        #
-        # for k in to_load['net_0'].keys():
-        #     to_load['net_0'][k] = to_load_sc['net_1'][k]
-        #
-        # models['net_0'].load_state_dict(to_load['net_0'])
+        fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
+        to_load_sc = torch.load(fpath_sc, map_location=map_location)
+
+        for k in to_load['net_0'].keys():
+            to_load['net_0'][k] = to_load_sc['net_1'][k]
+
+        models['net_0'].load_state_dict(to_load['net_0'])
 
     elif not args.have_box:
 
@@ -717,7 +717,7 @@ def create_nerf(rank, args):
 
         map_location = 'cuda:%d' % rank
 
-        fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/fgbg_pts/model_280000.pth"
+        fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/fgbg_pts/model_405000.pth"
 
         to_load_dep = torch.load(fpath_dep, map_location=map_location)
 
@@ -730,14 +730,14 @@ def create_nerf(rank, args):
         #         models[name].load_state_dict(to_load[name])
         ####################################################################################333
         #### tmp for reloading pretrained model
-        # fpath_sc = "./logs/pretrained/scene/model_425000.pth"
+        # fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/sceneonly/model_425000.pth"
         #
         # to_load_sc = torch.load(fpath_sc, map_location=map_location)
         #
         # for k in to_load_sc['net_0'].keys():
-        #       to_load['net_0'][k] = to_load_sc['net_1'][k]
+        #       to_load_dep['net_0'][k] = to_load_sc['net_1'][k]
         #
-        # models['net_0'].load_state_dict(to_load['net_0'])
+        # models['net_0'].load_state_dict(to_load_dep['net_0'])
 
         fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
         to_load_sc = torch.load(fpath_sc, map_location=map_location)
@@ -834,7 +834,7 @@ def ddp_train_nerf(rank, args):
     ray_samplers = load_data_split(args.datadir, args.scene, split='train',
                                    try_load_min_depth=args.load_min_depth, have_box=args.have_box,
                                    train_depth=True)
-    val_ray_samplers = load_data_split(args.datadir, args.scene, split='validation_old',
+    val_ray_samplers = load_data_split(args.datadir, args.scene, split='validation',
                                        try_load_min_depth=args.load_min_depth, skip=args.testskip, have_box=args.have_box,
                                        train_depth=True)
 
@@ -1032,7 +1032,7 @@ def ddp_train_nerf(rank, args):
 
 
             if loss_type is 'bce':
-                fg_weights = torch.sigmoid(fg_weights).clone().detach() +0.05
+                fg_weights = torch.sigmoid(fg_weights).clone().detach()
             else:
                 fg_weights = F.softmax(ret['likeli_fg'],dim=-1).clone().detach()
 
@@ -1054,7 +1054,7 @@ def ddp_train_nerf(rank, args):
 
             bg_depth_mid = bg_mid
             if loss_type is 'bce':
-                bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach() + 0.05
+                bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach() +0.05
             else:
                 bg_weights = F.softmax(ret['likeli_bg'],dim=-1)[:, 1: args.back_sample-1].clone().detach()
 

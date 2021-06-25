@@ -182,8 +182,8 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     locs = []
 
     # # tmp ##
-    # if cam_cnt > 16:
-    #     cam_cnt = 16
+    if cam_cnt > 16:
+        cam_cnt = 16
     # ## tmp ##
 
     max = np.array([100., 140.])
@@ -241,8 +241,8 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       max_depth=max_depth, depth_path=depth_files[i],
                                                       make_class_label=False))
 
-    logger.info('Split {}, # views: {}'.format(split, cam_cnt))
-
+    # logger.info('Split {}, # views: {}'.format(split, cam_cnt))
+    #
 
     #
     # for i, p in enumerate(poses):
