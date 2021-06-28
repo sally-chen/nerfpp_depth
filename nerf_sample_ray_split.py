@@ -95,14 +95,17 @@ class RaySamplerSingleImage(object):
         self.box_loc = box_loc
 
         number = self.img_path[-9:-4]
-        self.label_path = self.img_path[:-13] + 'class_label_sameseg/' + number
-        # self.label_path = '/home/sally/data/' + 'class_label_sameseg/' + number
+        self.label_path = self.img_path[:-13] + 'class_label_sameseg_rayd128_cor/' + number
+
+        # p = os.path.normpath(self.img_path[:-13])
+        # fol = p.split(os.sep)[-1]
+        # self.label_path = '/home/sally/data/' +fol + '/class_label_sameseg_rayd128_cor/' + number
 
 
         if make_class_label:
 
-            # os.makedirs('/home/sally/data/' + 'class_label_sameseg/', exist_ok=True)
-            os.makedirs(self.img_path[:-13] + 'class_label_sameseg/', exist_ok=True)
+            # os.makedirs('/home/sally/data/' +fol+ '/class_label_sameseg_rayd128_cor/', exist_ok=True)
+            os.makedirs(self.img_path[:-13] + 'class_label_sameseg_rayd128_cor/', exist_ok=True)
             self.get_classifier_label_torch(N_front_sample=128, N_back_sample=128, pretrain=True, save=True)
 
 
@@ -191,21 +194,37 @@ class RaySamplerSingleImage(object):
 
 
     def depth_normalize(self,depth_map):
-        max = np.array([100., 140.])
-        min = np.array([85., 125.])
-        avg_pose = np.array([0.5, 0.5])
+        max = np.array([100., 140.,2.8])
+        min = np.array([85., 125., 2.8])
+        avg_pose = np.array([0.5, 0.5,0.])
+
+        diff = 15.
 
         ray_d_norm = np.linalg.norm(self.rays_d, axis=-1, keepdims=True)  # [..., 1]
         viewdirs = self.rays_d / ray_d_norm  # [..., 3]
+        ro_denorm = self.rays_o.copy()
+        ro_denorm= ((ro_denorm) / 0.5 + avg_pose) * diff # ray o to real
+        depth_real = ro_denorm + depth_map[:, None] * viewdirs # get obj loc in real
 
-        ro_denorm = ((self.rays_o[:, :2]) / 0.5 + avg_pose) * (max - min) + min # ray o to real
-        depth_real = ro_denorm + depth_map[:, None] * viewdirs[:, :2] # get obj depth in real
-        depth_real_norm = ((depth_real - min) / (max - min) - avg_pose) * 0.5 # get obj depth in norm
-        depth_map_norm = np.linalg.norm(depth_real_norm[:, :2] - self.rays_o[:, :2], axis=-1, keepdims=False) # get depth map in norm
+        depth_real_norm = depth_real.copy()
+        depth_real_norm = ((depth_real_norm)/ diff - avg_pose)*0.5 # get obj depth in norm
+        depth_map_norm = np.linalg.norm(
+            (depth_real_norm  - self.rays_o),
+            axis=-1, keepdims=False) # get depth map in norm
+
+        # ro_denorm = ((self.rays_o[:, :2]) / 0.5 + avg_pose) * (max - min) + min  # ray o to real
+        # depth_real = ro_denorm + depth_map[:, None] * viewdirs[:, :2]  # get obj depth in real
+        # depth_real_norm = ((depth_real - min) / (max - min) - avg_pose) * 0.5  # get obj depth in norm
+        # depth_map_norm = np.linalg.norm(depth_real_norm[:, :2] - self.rays_o[:, :2], axis=-1,
+        #                                 keepdims=False)  # get depth map in norm
+
 
         ray_d_cos = 1. / np.linalg.norm(self.rays_d, axis=-1, keepdims=False)
 
-        return depth_map_norm * ray_d_cos
+        re = depth_map_norm * ray_d_cos
+
+        return re
+        # return depth_map_norm
 
 
 
@@ -318,7 +337,9 @@ class RaySamplerSingleImage(object):
         same_seg = True
 
         if same_seg:
-            fg_near_depth = fg_far_depth - 2.  # [H*W,]
+            # fg_near_depth = fg_far_depth - 2.  # [H*W,]
+            ray_d_cos = 1. / torch.norm(rays_d, dim=-1, keepdim=False)
+            fg_near_depth =  fg_far_depth - 2.*ray_d_cos
         else:
 
             fg_near_depth =  torch.from_numpy(1e-4 * np.ones_like(self.rays_d[..., 0])).to(rank)
@@ -356,9 +377,9 @@ class RaySamplerSingleImage(object):
         fg_pts_flat = fg_pts.view(N_rays, -1)
         bg_pts_flat = torch.flip(bg_pts, dims=[1,]).view(N_rays, -1)
 
-        # if pretrain and save:
+        if pretrain and save:
 
-        if True:
+        # if True:
 
             depth_map = torch.from_numpy(self.depth_map).to(rank)
 
@@ -467,15 +488,18 @@ class RaySamplerSingleImage(object):
                 cur_time_sp = time.time() - cur_time
                 print('[TIME] depth filter {}'.format(cur_time_sp))
 
-            # zarr.save(self.label_path+'.zarr', cls_label_flat_filtered.detach().cpu().numpy())
-            #
-            # return
-            cls_label_flat_filtered_ = cls_label_flat_filtered
+            zarr.save(self.label_path+'.zarr', cls_label_flat_filtered.detach().cpu().numpy())
+
+            return
+            # cls_label_flat_filtered_ = cls_label_flat_filtered
+            # if select_inds is not None:
+            #     cls_label_flat_filtered_ = cls_label_flat_filtered[select_inds]
+            # else:
+            #     cls_label_flat_filtered_ = cls_label_flat_filtered
 
 
-
-        elif pretrain is False:
-            cls_label_flat_filtered_ = None
+        # elif pretrain is False:
+        #     cls_label_flat_filtered_ = None
 
         else:
 
@@ -504,7 +528,7 @@ class RaySamplerSingleImage(object):
                 cur_time = time.time()
             del cls_label_flat_filtered
 
-        return cls_label_flat_filtered_, fg_pts_flat, bg_pts_flat, bg_z_vals, fg_z_vals
+        return cls_label_flat_filtered_, None, None, bg_z_vals, fg_z_vals
 
 
 
@@ -525,8 +549,8 @@ class RaySamplerSingleImage(object):
 
 
 
-        fg_pts_flat = fg_pts_flat[select_inds]
-        bg_pts_flat = bg_pts_flat[select_inds]
+        # fg_pts_flat = fg_pts_flat[select_inds]
+        # bg_pts_flat = bg_pts_flat[select_inds]
 
         bg_z_vals_centre = bg_z_vals_centre[select_inds]
         fg_z_vals_centre = fg_z_vals_centre[select_inds]
@@ -536,7 +560,7 @@ class RaySamplerSingleImage(object):
         if pretrain:
             cls_label_filtered = axis_filtered_depth_flat
         else:
-            cls_label_filtered = None
+            cls_label_filtered = axis_filtered_depth_flat
 
 
 

@@ -274,9 +274,13 @@ class NerfNet(nn.Module):
         min = torch.tensor([85., 125.]).to(device_num)
         avg_pose = torch.tensor([0.5,  0.5]).to(device_num)
 
-        depth_pt_denorm = ((ray_o[:,:2] + depth_map.unsqueeze(-1) * ray_d[:, :2]) / 0.5 + avg_pose) * (max-min) + min
-        ro_denorm = ((ray_o[:,:2]) / 0.5 + avg_pose) * (max-min) + min
-        depth_map = torch.norm(depth_pt_denorm[:,:2] - ro_denorm, dim=1, keepdim=False)
+        obj_pt_norm = ray_o + depth_map.unsqueeze(-1) * ray_d
+
+        obj_pt_denorm = obj_pt_norm.clone()
+        obj_pt_denorm[:,:2] = (obj_pt_norm[:,:2]/ 0.5 + avg_pose) * 15.
+        ro_denorm = ray_o.clone()
+        ro_denorm[:,:2]   = ((ray_o[:,:2]) / 0.5 + avg_pose) * 15.
+        depth_map = torch.norm(obj_pt_denorm - ro_denorm, dim=1, keepdim=False)
 
 
         ret = OrderedDict([('rgb', rgb_map),  # loss
