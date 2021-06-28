@@ -262,12 +262,13 @@ def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sampl
     return ret
 
 def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
-               bg_z_vals_centre, samples, box_weights=None, train_box_only=False, loss_type='ce'):
+               bg_z_vals_centre, samples, box_weights=None, train_box_only=False,
+               loss_type='ce', fg_weights=None, bg_weights=None, use_or=True):
 
 
-    fg_weights = data['likeli_fg'].clone() # Avoid inplace ops
-
-    bg_weights = data['likeli_bg'].clone()
+    if fg_weights is None:
+        fg_weights = data['likeli_fg'].clone() # Avoid inplace ops
+        bg_weights = data['likeli_bg'].clone()
     #
     # fg_z_vals_centre_np = fg_z_vals_centre.cpu().numpy()
     # bg_z_vals_centre_np = bg_z_vals_centre.cpu().numpy()
@@ -281,8 +282,8 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         fg_weights = F.softmax(fg_weights, dim=-1)
         # fg_weights = normalize_torch(fg_weights)[:, 1:front_sample-1]
     else:
-        # fg_weights = fg_weights[:, 1:front_sample-1] +0.001
-        fg_weights = torch.sigmoid(fg_weights)
+        fg_weights = normalize_torch(fg_weights)
+        # fg_weights = torch.sigmoid(fg_weights)
 
     fg_weights[fg_z_vals_centre < 0.0002] = 0.0
     if box_weights is not None:
@@ -312,8 +313,8 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         bg_weights = F.softmax(bg_weights, dim=-1)[:, 1:back_sample-1]
         # bg_weights = normalize_torch(bg_weights)[:, 1:back_sample-1]
     else:
-        # bg_weights = bg_weights[:, 1:back_sample-1]+0.05
-        bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]
+        bg_weights = normalize_torch(bg_weights)[:, 1:back_sample-1]
+        # bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]
 
 
     bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
@@ -321,8 +322,9 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
 
     # bg_depth_np = bg_depth.cpu().numpy()
     # fg_depth_np = fg_depth.cpu().numpy()
-
-    return fg_depth, bg_depth
+    if use_or:
+        return fg_depth, bg_depth
+    return fg_depth_mid, bg_depth_mid
 
 
 def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
@@ -365,7 +367,8 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
         fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
                                         fg_z_vals_centre, bg_z_vals_centre,
-                                        samples, box_weights, train_box_only, loss_type)
+                                        samples, box_weights, train_box_only, loss_type,use_or=True
+                                       )
 
 
         if not have_box:
@@ -375,8 +378,18 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
         else:
             ret = net(ray_o, ray_d, fg_far_depth, fg_depth)
 
+        # fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
+        #                                 fg_z_vals_centre, bg_z_vals_centre,
+        #                                 samples, box_weights, train_box_only, loss_type,
+        #                                 ret['fg_weights'], ret['bg_weights'])
+        #
+        # ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
+        #
         ret['likeli_fg'] = ret_or['likeli_fg']
         ret['likeli_bg'] = ret_or['likeli_bg']
+        #
+        # ret['likeli_fg'] = ret['fg_weights']
+        # ret['likeli_bg'] = ret['bg_weights']
 
         return ret
 
@@ -573,7 +586,7 @@ def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask
     rgb_im = img_HWC2CHW(torch.from_numpy(gt_img))
     writer.add_image(prefix + 'rgb_gt', rgb_im, global_step)
 
-    loss = img2mse(rgb_predict.cpu().reshape(-1), rgb_im.reshape(-1)).item()
+    loss = img2mse(rgb_predict.cpu().reshape(-1), torch.from_numpy(gt_img).reshape(-1)).item()
     writer.add_scalar(prefix + 'rgb_loss', loss, global_step)
     writer.add_scalar( prefix + 'psnr', mse2psnr(loss), global_step)
 
@@ -682,10 +695,10 @@ def create_nerf(rank, args):
         map_location = 'cuda:%d' % rank
 
         to_load = torch.load(fpath, map_location=map_location)
-
-        models['optim_oracle'].load_state_dict(to_load['optim_oracle'])
-        models['net_oracle'].load_state_dict(to_load['net_oracle'])
-        
+        #
+        # models['optim_oracle'].load_state_dict(to_load['optim_oracle'])
+        # models['net_oracle'].load_state_dict(to_load['net_oracle'])
+        #
 
 
         ###########################33 before donerf use random weights for nerf ##########    
@@ -703,13 +716,13 @@ def create_nerf(rank, args):
         #
         # models['net_0'].load_state_dict(to_load['net_0'])
 
-        fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
-        to_load_sc = torch.load(fpath_sc, map_location=map_location)
-
-        for k in to_load['net_0'].keys():
-            to_load['net_0'][k] = to_load_sc['net_1'][k]
-
-        models['net_0'].load_state_dict(to_load['net_0'])
+        # fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
+        # to_load_sc = torch.load(fpath_sc, map_location=map_location)
+        #
+        # for k in to_load['net_0'].keys():
+        #     to_load['net_0'][k] = to_load_sc['net_1'][k]
+        #
+        # models['net_0'].load_state_dict(to_load['net_0'])
 
     elif not args.have_box:
 
@@ -717,12 +730,12 @@ def create_nerf(rank, args):
 
         map_location = 'cuda:%d' % rank
 
-        fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/fgbg_pts/model_405000.pth"
-
-        to_load_dep = torch.load(fpath_dep, map_location=map_location)
-
-        models['optim_oracle'].load_state_dict(to_load_dep['optim_oracle'])
-        models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
+        # fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/fgbg_pts_depscale/model_540000.pth"
+        # #
+        # to_load_dep = torch.load(fpath_dep, map_location=map_location)
+        #
+        # models['optim_oracle'].load_state_dict(to_load_dep['optim_oracle'])
+        # models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
 
         ###########################33 before donerf use random weights for nerf ##########
         # for m in range(models['cascade_level']):
@@ -739,13 +752,13 @@ def create_nerf(rank, args):
         #
         # models['net_0'].load_state_dict(to_load_dep['net_0'])
 
-        fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
-        to_load_sc = torch.load(fpath_sc, map_location=map_location)
-
-        for k in to_load_dep['net_0'].keys():
-            to_load_dep['net_0'][k] = to_load_sc['net_1'][k]
-
-        models['net_0'].load_state_dict(to_load_dep['net_0'])
+        # fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
+        # to_load_sc = torch.load(fpath_sc, map_location=map_location)
+        #
+        # for k in to_load_dep['net_0'].keys():
+        #     to_load_dep['net_0'][k] = to_load_sc['net_1'][k]
+        #
+        # models['net_0'].load_state_dict(to_load_dep['net_0'])
 
 
 
@@ -834,7 +847,7 @@ def ddp_train_nerf(rank, args):
     ray_samplers = load_data_split(args.datadir, args.scene, split='train',
                                    try_load_min_depth=args.load_min_depth, have_box=args.have_box,
                                    train_depth=True)
-    val_ray_samplers = load_data_split(args.datadir, args.scene, split='validation',
+    val_ray_samplers = load_data_split(args.datadir, args.scene, split='test',
                                        try_load_min_depth=args.load_min_depth, skip=args.testskip, have_box=args.have_box,
                                        train_depth=True)
 
@@ -858,7 +871,7 @@ def ddp_train_nerf(rank, args):
     loss_bce = torch.nn.BCEWithLogitsLoss()
 
     loss_type = 'bce'
-    add_entropy = True
+    add_entropy = False
 
     # with torch.autograd.detect_anomaly():
     for global_step in range(start+1, start+1+args.N_iters):
@@ -992,32 +1005,32 @@ def ddp_train_nerf(rank, args):
 
         else:
 
-            with torch.no_grad():
-
-                if args.fg_bg_net:
-
-                    if not args.use_zval:
-
-
-
-                        ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-                                         ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
-                                         ray_batch['fg_far_depth'].float())
-                    else:
-
-                        ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-                                         fg_mid.float(), bg_mid.float(),
-                                         ray_batch['fg_far_depth'].float())
-
-                else:
-
-                    if args.use_zval:
-                        pts = torch.cat([ray_batch['fg_z_vals_centre'], ray_batch['bg_z_vals_centre']], dim=-1)
-                    else:
-                        pts = torch.cat([ray_batch['fg_pts_flat'], ray_batch['bg_pts_flat']], dim=-1)
-                    ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(), pts.float())
-
-            # results on different cascade levels
+            # with torch.no_grad():
+            #
+            #     if args.fg_bg_net:
+            #
+            #         if not args.use_zval:
+            #
+            #
+            #
+            #             ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+            #                              ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
+            #                              ray_batch['fg_far_depth'].float())
+            #         else:
+            #
+            #             ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+            #                              fg_mid.float(), bg_mid.float(),
+            #                              ray_batch['fg_far_depth'].float())
+            #
+            #     else:
+            #
+            #         if args.use_zval:
+            #             pts = torch.cat([ray_batch['fg_z_vals_centre'], ray_batch['bg_z_vals_centre']], dim=-1)
+            #         else:
+            #             pts = torch.cat([ray_batch['fg_pts_flat'], ray_batch['bg_pts_flat']], dim=-1)
+            #         ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(), pts.float())
+            #
+            # # results on different cascade levels
 
             optim = models['optim_0']
             net = models['net_0']
@@ -1027,12 +1040,13 @@ def ddp_train_nerf(rank, args):
 
             fg_depth_mid = fg_mid
 
-            fg_weights = ret['likeli_fg']
+            fg_weights = ray_batch['cls_label'][:,:args.front_sample]
 
 
 
             if loss_type is 'bce':
-                fg_weights = torch.sigmoid(fg_weights).clone().detach()
+                fg_weights = fg_weights.clone().detach()
+                # fg_weights = torch.sigmoid(fg_weights).clone().detach()
             else:
                 fg_weights = F.softmax(ret['likeli_fg'],dim=-1).clone().detach()
 
@@ -1054,7 +1068,8 @@ def ddp_train_nerf(rank, args):
 
             bg_depth_mid = bg_mid
             if loss_type is 'bce':
-                bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach() +0.05
+                # bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach() +0.05
+                bg_weights = ray_batch['cls_label'][:,args.front_sample:][:, 1: args.back_sample-1].clone().detach()
             else:
                 bg_weights = F.softmax(ret['likeli_bg'],dim=-1)[:, 1: args.back_sample-1].clone().detach()
 
@@ -1128,7 +1143,7 @@ def ddp_train_nerf(rank, args):
 
             # select_inds = np.random.choice(640*360, size=(200,), replace=False)
 
-            select_inds = np.arange(640*180,640*181)
+            select_inds = np.arange(640*350,640*351)
 
             #### critical: make sure each process is working on the same random image
             time0 = time.time()
@@ -1254,8 +1269,8 @@ def ddp_train_nerf(rank, args):
 
 
             else:
-                # label_fg = label[:, :args.front_sample]
-                # label_bg = label[:, args.front_sample:]
+                label_fg = label[:, :args.front_sample]
+                label_bg = label[:, args.front_sample:]
                 #if args.depth_training:
                 log_view_to_tb(writer, global_step, rgb,d , gt_depth=val_ray_samplers[idx].get_depth(),
                                gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
@@ -1268,10 +1283,10 @@ def ddp_train_nerf(rank, args):
 
                 else:
 
-                    visualize_depth_label(writer,None,
-                                          torch.sigmoid(pred_fg[select_inds]), global_step, 'val/dVis_fg')
-                    visualize_depth_label(writer, None,
-                                          torch.sigmoid(pred_bg[select_inds]), global_step, 'val/dVis_bg')
+                    visualize_depth_label(writer,np.array(label_fg[select_inds].cpu().detach().numpy()),
+                                          pred_fg[select_inds], global_step, 'val/dVis_fg')
+                    visualize_depth_label(writer, np.array(label_bg[select_inds].cpu().detach().numpy()),
+                                          pred_bg[select_inds], global_step, 'val/dVis_bg')
                 #else:
                  #   log_view_to_tb(writer, global_step, log_data, gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
 
@@ -1411,9 +1426,9 @@ def ddp_train_nerf(rank, args):
                 else:
 
                     visualize_depth_label(writer, np.array(label_fg[select_inds].cpu().detach().numpy()),
-                                          torch.sigmoid(pred_fg[select_inds]), global_step, 'train/dVis_fg')
+                                          pred_fg[select_inds], global_step, 'train/dVis_fg')
                     visualize_depth_label(writer, np.array(label_bg[select_inds].cpu().detach().numpy()),
-                                          torch.sigmoid(pred_bg[select_inds]), global_step, 'train/dVis_bg')
+                                          pred_bg[select_inds], global_step, 'train/dVis_bg')
 
 
 
