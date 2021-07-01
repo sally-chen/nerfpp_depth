@@ -239,7 +239,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       mask_path=mask_files[i],
                                                       min_depth_path=mindepth_files[i],
                                                       max_depth=max_depth, depth_path=depth_files[i],
-                                                      make_class_label=False))
+                                                      make_class_label=True))
 
     # logger.info('Split {}, # views: {}'.format(split, cam_cnt))
     #

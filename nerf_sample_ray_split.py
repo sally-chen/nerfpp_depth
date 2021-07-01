@@ -95,7 +95,7 @@ class RaySamplerSingleImage(object):
         self.box_loc = box_loc
 
         number = self.img_path[-9:-4]
-        self.label_path = self.img_path[:-13] + 'class_label_sameseg_rayd128_cor/' + number
+        self.label_path = self.img_path[:-13] + 'class_label_sameseg_rayd128_final/' + number
 
         # p = os.path.normpath(self.img_path[:-13])
         # fol = p.split(os.sep)[-1]
@@ -105,7 +105,7 @@ class RaySamplerSingleImage(object):
         if make_class_label:
 
             # os.makedirs('/home/sally/data/' +fol+ '/class_label_sameseg_rayd128_cor/', exist_ok=True)
-            os.makedirs(self.img_path[:-13] + 'class_label_sameseg_rayd128_cor/', exist_ok=True)
+            os.makedirs(self.img_path[:-13] + 'class_label_sameseg_rayd128_final/', exist_ok=True)
             self.get_classifier_label_torch(N_front_sample=128, N_back_sample=128, pretrain=True, save=True)
 
 
@@ -200,18 +200,20 @@ class RaySamplerSingleImage(object):
 
         diff = 15.
 
-        ray_d_norm = np.linalg.norm(self.rays_d, axis=-1, keepdims=True)  # [..., 1]
-        viewdirs = self.rays_d / ray_d_norm  # [..., 3]
-        ro_denorm = self.rays_o.copy()
-        ro_denorm= ((ro_denorm) / 0.5 + avg_pose) * diff # ray o to real
-        depth_real = ro_denorm + depth_map[:, None] * viewdirs # get obj loc in real
+        # v2
+        # ray_d_norm = np.linalg.norm(self.rays_d, axis=-1, keepdims=True)  # [..., 1]
+        # viewdirs = self.rays_d / ray_d_norm  # [..., 3]
+        # ro_denorm = self.rays_o.copy()
+        # ro_denorm= ((ro_denorm) / 0.5 + avg_pose) * diff # ray o to real
+        # depth_real = ro_denorm + depth_map[:, None] * viewdirs # get obj loc in real
+        #
+        # depth_real_norm = depth_real.copy()
+        # depth_real_norm = ((depth_real_norm)/ diff - avg_pose)*0.5 # get obj depth in norm
+        # depth_map_norm = np.linalg.norm(
+        #     (depth_real_norm  - self.rays_o),
+        #     axis=-1, keepdims=False) # get depth map in norm
 
-        depth_real_norm = depth_real.copy()
-        depth_real_norm = ((depth_real_norm)/ diff - avg_pose)*0.5 # get obj depth in norm
-        depth_map_norm = np.linalg.norm(
-            (depth_real_norm  - self.rays_o),
-            axis=-1, keepdims=False) # get depth map in norm
-
+        #v1
         # ro_denorm = ((self.rays_o[:, :2]) / 0.5 + avg_pose) * (max - min) + min  # ray o to real
         # depth_real = ro_denorm + depth_map[:, None] * viewdirs[:, :2]  # get obj depth in real
         # depth_real_norm = ((depth_real - min) / (max - min) - avg_pose) * 0.5  # get obj depth in norm
@@ -219,12 +221,16 @@ class RaySamplerSingleImage(object):
         #                                 keepdims=False)  # get depth map in norm
 
 
+        # downscal = np.sqrt(3 * np.power(30., 2))
+
+        depth_map_norm = depth_map / 30.
+
         ray_d_cos = 1. / np.linalg.norm(self.rays_d, axis=-1, keepdims=False)
 
         re = depth_map_norm * ray_d_cos
 
-        return re
-        # return depth_map_norm
+        # return re
+        return depth_map_norm
 
 
 
@@ -528,7 +534,7 @@ class RaySamplerSingleImage(object):
                 cur_time = time.time()
             del cls_label_flat_filtered
 
-        return cls_label_flat_filtered_, None, None, bg_z_vals, fg_z_vals
+        return cls_label_flat_filtered_, fg_pts_flat, bg_pts_flat, bg_z_vals, fg_z_vals
 
 
 
@@ -549,8 +555,8 @@ class RaySamplerSingleImage(object):
 
 
 
-        # fg_pts_flat = fg_pts_flat[select_inds]
-        # bg_pts_flat = bg_pts_flat[select_inds]
+        fg_pts_flat = fg_pts_flat[select_inds]
+        bg_pts_flat = bg_pts_flat[select_inds]
 
         bg_z_vals_centre = bg_z_vals_centre[select_inds]
         fg_z_vals_centre = fg_z_vals_centre[select_inds]
