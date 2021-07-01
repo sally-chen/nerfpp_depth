@@ -726,7 +726,7 @@ def create_nerf(rank, args):
 
     elif not args.have_box:
 
-        # start = 0
+        start = 0
         #
         # map_location = 'cuda:%d' % rank
         #
@@ -1005,31 +1005,31 @@ def ddp_train_nerf(rank, args):
 
         else:
 
-            # with torch.no_grad():
-            #
-            #     if args.fg_bg_net:
-            #
-            #         if not args.use_zval:
-            #
-            #
-            #
-            #             ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-            #                              ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
-            #                              ray_batch['fg_far_depth'].float())
-            #         else:
-            #
-            #             ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-            #                              fg_mid.float(), bg_mid.float(),
-            #                              ray_batch['fg_far_depth'].float())
-            #
-            #     else:
-            #
-            #         if args.use_zval:
-            #             pts = torch.cat([ray_batch['fg_z_vals_centre'], ray_batch['bg_z_vals_centre']], dim=-1)
-            #         else:
-            #             pts = torch.cat([ray_batch['fg_pts_flat'], ray_batch['bg_pts_flat']], dim=-1)
-            #         ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(), pts.float())
-            #
+            with torch.no_grad():
+
+                if args.fg_bg_net:
+
+                    if not args.use_zval:
+
+
+
+                        ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                                         ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
+                                         ray_batch['fg_far_depth'].float())
+                    else:
+
+                        ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                                         fg_mid.float(), bg_mid.float(),
+                                         ray_batch['fg_far_depth'].float())
+
+                else:
+
+                    if args.use_zval:
+                        pts = torch.cat([ray_batch['fg_z_vals_centre'], ray_batch['bg_z_vals_centre']], dim=-1)
+                    else:
+                        pts = torch.cat([ray_batch['fg_pts_flat'], ray_batch['bg_pts_flat']], dim=-1)
+                    ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(), pts.float())
+
             # # results on different cascade levels
 
             optim = models['optim_0']
@@ -1041,6 +1041,7 @@ def ddp_train_nerf(rank, args):
             fg_depth_mid = fg_mid
 
             # fg_weights = ray_batch['cls_label'][:,:args.front_sample]
+            fg_weights = ret['likeli_fg']
 
 
 
