@@ -8,8 +8,14 @@ def plot_mult_pose(poses_list, name, labels):
     ax = fig.add_subplot(111, projection='3d')
     #
     colors = ['b', 'r', 'c', 'm', 'y', 'b', 'r', 'c', 'm']
-    for i in range(len(poses_list)):
-        plot_single_pose(poses_list[i],colors[i], ax, labels[i])
+
+    # for i in range(len(poses_list)):
+    #     plot_single_pose(poses_list[i],colors[i], ax, labels[i])
+
+    plot_single_pose(poses_list[0],colors[0], ax, labels[0])
+    for i in range(10):
+        plot_single_pose(poses_list[1][i], colors[1], ax, labels[1])
+
     ax.set_xlabel('X Label')
     ax.set_ylabel('Y Label')
     ax.set_zlabel('Z Label')
@@ -20,7 +26,7 @@ def plot_mult_pose(poses_list, name, labels):
 def plot_single_pose(poses, color, ax, label):
     # poses shape N, 3, 4
     ax.scatter(poses[:, 0, 3], poses[:, 1, 3], poses[:, 2, 3], marker='o', color=color, label=label)
-    #
+
     # for i in range(poses.shape[0]):
     #     ax.plot([poses[i, 0, 3], poses[i, 0, 3] + poses[i, 0, 2]],
     #             [poses[i, 1, 3], poses[i, 1, 3] + poses[i, 1, 2]],

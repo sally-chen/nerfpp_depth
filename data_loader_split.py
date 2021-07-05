@@ -170,77 +170,97 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     intrins = []
     locs = []
     for i in range(cam_cnt):
-        intrinsics = parse_txt(intrinsics_files[i])
+        # intrinsics = parse_txt(intrinsics_files[i])
         pose = parse_txt(pose_files[i])
 
-        ################## rand ##############33
-        #pose[:2,3] = pose[:2,3] * 0.5
-        ################## rand ##############33
-        # pose[:2,3] = pose[:2,3]
+        if( (pose[0][3] < 0.15) or (pose[0][3] >= 0.15 and -0.25 <= pose[1][3] and pose[1][3] <= 0.15)):
+            ################## rand ##############33
+            #pose[:2,3] = pose[:2,3] * 0.5
+            ################## rand ##############33
+            # pose[:2,3] = pose[:2,3]
 
-        poses.append(pose)
-        intrins.append(intrinsics)
-        if have_box:
-            loc = parse_txt_loc(loc_files[i])
-            #loc[:2] += 0.1
-            locs.append(loc)
+            poses.append(pose)
 
+            intrinsics = parse_txt(intrinsics_files[i])
+            intrins.append(intrinsics)
 
-
-
-
-        # read max depth
-        try:
-            max_depth = float(open('{}/max_depth.txt'.format(split_dir)).readline().strip())
-        except:
-            max_depth = None
+            if have_box:
+                loc = parse_txt_loc(loc_files[i])
+                #loc[:2] += 0.1
+                locs.append(loc)
 
 
-        if have_box:
-            ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
+
+
+
+            # read max depth
+            try:
+                max_depth = float(open('{}/max_depth.txt'.format(split_dir)).readline().strip())
+            except:
+                max_depth = None
+
+
+            if have_box:
+                ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
                                                       img_path=img_files[i],
                                                       mask_path=mask_files[i],
                                                       min_depth_path=mindepth_files[i],
                                                       max_depth=max_depth, box_loc=loc,
                                                       depth_path=depth_files[i]))
                                                       # max_depth=max_depth, box_loc=locs[i]))
-        else:
-            ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
+            else:
+                ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
                                                       img_path=img_files[i],
                                                       mask_path=mask_files[i],
                                                       min_depth_path=mindepth_files[i],
                                                       max_depth=max_depth, depth_path=depth_files[i]
                                                       ))
+    # end for range cam_cnt
 
-    logger.info('Split {}, # views: {}'.format(split, cam_cnt))
+    # logger.info('Split {}, # views: {}'.format(split, cam_cnt))
+    logger.info('Split {}, # views: {}'.format(split, len(poses)))
 
-    #
-    # TODO: commented for debugging.
-    # if not have_box:
-    #     plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
-    #                     ['scene poses'])
+
+    # Plot poses and box locs
+    if not have_box:
+        plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
+                        ['scene poses'])
     
-    # else:
-    #     dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
-    #     locs = np.stack(locs, axis=0)
-    #     dummy_pose_loc[:,:3, 3] = locs
-    #     plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
-    #                    ['scene poses','box'])
-    #
-    #
-    # ## denorm first and save for test ##
-    #
-    # max = np.array([100., 140.])
-    # min = np.array([85., 125.])
-    # avg_pose = np.array([0.5, 0.5])
-    #
-    # for i, p in enumerate(poses):
-    #     poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
-    #     locs[i][:2] = (locs[i][:2] / 0.5 + avg_pose) * (max - min) + min
-    #
-    #
-    # filename = split_dir + '/sample_arrs'
-    # outfile = open(filename, 'wb')
-    # pickle.dump([poses, intrins, locs], outfile)
-    # outfile.close()
+    else:
+        # dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
+        # locs = np.stack(locs, axis=0)
+        # dummy_pose_loc[:,:3, 3] = locs[:, :3]
+        # plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
+        #                ['scene poses','box'])
+
+        locs = np.stack(locs, axis=0) #(N, 30)
+        
+        dummy_pose_loc_lst = []
+        for i in range(10):
+            dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
+            dummy_pose_loc[:,:3, 3] = locs[:, i*3 : i*3+3]
+            dummy_pose_loc_lst.append(dummy_pose_loc)
+        
+        if(split == 'train'):
+            plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc_lst], 'input poses nerf ++',
+                           ['scene poses','box'])
+    
+    
+    ## denorm first and save for test ##
+    
+    max = np.array([100., 140.])
+    min = np.array([85., 125.])
+    avg_pose = np.array([0.5, 0.5])
+    
+    for i, p in enumerate(poses):
+        poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
+        # locs[i][:2] = (locs[i][:2] / 0.5 + avg_pose) * (max - min) + min
+        for j in range(10):
+            locs[i][j*3 : j*3+2] = (locs[i][j*3 : j*3+2] / 0.5 + avg_pose) * (max - min) + min
+    
+    
+    filename = split_dir + '/sample_arrs'
+    outfile = open(filename, 'wb')
+    pickle.dump([poses, intrins, locs], outfile)
+    outfile.close()
     return ray_samplers

@@ -429,12 +429,12 @@ def create_nerf_noddp(args):
 
         # TODO: ====
         # Add extra name module.*
-        for m in range(models['cascade_level']):
-            # name: net_0 net_1 optim_0 optim_1
-            new_dict = dict()
-            for k, v in to_load['net_{}'.format(m)].items():
-                new_dict['module.' + k] = v
-            to_load['net_{}'.format(m)] = new_dict
+        # for m in range(models['cascade_level']):
+        #     # name: net_0 net_1 optim_0 optim_1
+        #     new_dict = dict()
+        #     for k, v in to_load['net_{}'.format(m)].items():
+        #         new_dict['module.' + k] = v
+        #     to_load['net_{}'.format(m)] = new_dict
                 
             
         # ========================
@@ -442,7 +442,7 @@ def create_nerf_noddp(args):
         for m in range(models['cascade_level']):
             # name: net_0 net_1 optim_0 optim_1
             for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-                # models[name].load_state_dict(to_load[name])
+                models[name].load_state_dict(to_load[name])
                 if name.startswith('net'):
                     models[name].to(torch.cuda.current_device())
 
@@ -889,13 +889,13 @@ def train():
     args = parser.parse_args()
     logger.info(parser.format_values())
 
-    torch.cuda.set_device(2)
+    torch.cuda.set_device(0)
     print(torch.cuda.get_device_name(torch.cuda.current_device()))
     ddp_train_nerf(rank=torch.cuda.current_device(), args=args)
 
 
 if __name__ == '__main__':
     setup_logger()
-train()
+    train()
 
 

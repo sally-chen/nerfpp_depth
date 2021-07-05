@@ -302,6 +302,15 @@ class NerfNetBox(nn.Module):
         fg_box_raw_lst = []
 
         self.box_net = self.box_net.to(torch.cuda.current_device())
+
+        # box_offset_lst = []
+        # for i in range(10):
+        #     box_offset = (fg_pts - box_loc[:,i,:].unsqueeze(-2))*0.5
+        #     box_offset_lst.append(box_offset)
+        
+        # #concat box_offset_lst
+
+
         for i in range(10):
             # box_loc[:,i,:] (N, 3)
             # unsqueeze (N, 3) --> (N, 1, 3)
@@ -320,7 +329,9 @@ class NerfNetBox(nn.Module):
         fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
         # account for view directions
         fg_dists = ray_d_norm * torch.cat((fg_dists, fg_z_max.unsqueeze(-1) - fg_z_vals[..., -1:]), dim=-1)  # [..., N_samples]
-        fg_alpha = 1. - torch.exp(-(fg_raw['sigma'] + 0.1 * sum(fg_box_raw_lst[i]['sigma'] for i in range(10))) * fg_dists)  # [..., N_samples]
+        
+        fg_alpha = 1. - torch.exp(-(fg_raw['sigma'] + sum(fg_box_raw_lst[i]['sigma'] for i in range(10))) * fg_dists)  # [..., N_samples]
+
         T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)   # [..., N_samples]
         bg_lambda = T[..., -1]
         T = torch.cat((torch.ones_like(T[..., 0:1]), T[..., :-1]), dim=-1)  # [..., N_samples]
@@ -332,8 +343,8 @@ class NerfNetBox(nn.Module):
         ### TODO
 
         fg_rgb = torch.div(
-           0.1 * sum(fg_box_raw_lst[i]['sigma'].unsqueeze(-1) * fg_box_raw_lst[i]['rgb'] for i in range(10)) + fg_raw['sigma'].unsqueeze(-1) * fg_raw['rgb'],
-            (0.1 * sum(fg_box_raw_lst[i]['sigma'] for i in range(10)) +  fg_raw['sigma']).unsqueeze(-1)
+            sum(fg_box_raw_lst[i]['sigma'].unsqueeze(-1) * fg_box_raw_lst[i]['rgb'] for i in range(10)) + fg_raw['sigma'].unsqueeze(-1) * fg_raw['rgb'],
+            (sum(fg_box_raw_lst[i]['sigma'] for i in range(10)) +  fg_raw['sigma']).unsqueeze(-1)
         )
 
         N, d = fg_raw['sigma'].shape[0], fg_raw['sigma'].shape[1]
