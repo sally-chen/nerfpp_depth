@@ -4,6 +4,7 @@ import torch
 import cv2
 import imageio
 from PIL import Image
+import math
 from ddp_model import depth2pts_outside, depth2pts_outside_np
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 import pickle
@@ -95,17 +96,17 @@ class RaySamplerSingleImage(object):
         self.box_loc = box_loc
 
         number = self.img_path[-9:-4]
-        self.label_path = self.img_path[:-13] + 'class_label_sameseg_rayd128_final/' + number
-
+        self.label_path = self.img_path[:-13] + 'class_label_sameseg_rayd128_filt7/' + number
+        #
         # p = os.path.normpath(self.img_path[:-13])
         # fol = p.split(os.sep)[-1]
-        # self.label_path = '/home/sally/data/' +fol + '/class_label_sameseg_rayd128_cor/' + number
+        # self.label_path = '/home/sally/data/' +fol + '/class_label_sameseg_rayd128_filt7/' + number
 
 
         if make_class_label:
 
-            # os.makedirs('/home/sally/data/' +fol+ '/class_label_sameseg_rayd128_cor/', exist_ok=True)
-            os.makedirs(self.img_path[:-13] + 'class_label_sameseg_rayd128_final/', exist_ok=True)
+            # os.makedirs('/home/sally/data/' +fol+ '/class_label_sameseg_rayd128_filt7/', exist_ok=True)
+            os.makedirs(self.img_path[:-13] + 'class_label_sameseg_rayd128_filt7/', exist_ok=True)
             self.get_classifier_label_torch(N_front_sample=128, N_back_sample=128, pretrain=True, save=True)
 
 
@@ -176,7 +177,7 @@ class RaySamplerSingleImage(object):
                     # visualize_depth = False
 
 
-                # tmp = cv2.GaussianBlur(tmp, (9,9), 0 )
+                # tmp = cv2.GaussianBlur(tmp, (,5), 0 )
                 depth_map = tmp.reshape((-1))
 
 
@@ -430,35 +431,53 @@ class RaySamplerSingleImage(object):
             # ones = torch.cat([x.unsqueeze(-1),y.unsqueeze(-1),seg_ind.unsqueeze(-1)],dim=-1)
 
             ## you can technically loop through ones and compute that function
+            K_spat = 7
+            K_half_fl = int(np.floor(K_spat/2))
 
-            target_values = torch.from_numpy(np.array([[0., 0.20943058, 0.29289322, 0.20943058, 0.        ],\
-                               [0.20943058, 0.5       , 0.64644661, 0.5       , 0.20943058],\
-                               [0.29289322, 0.64644661, 1.        , 0.64644661, 0.29289322],\
-                               [0.20943058, 0.5       , 0.64644661, 0.5       , 0.20943058],\
-                               [0.        , 0.20943058, 0.29289322, 0.20943058, 0.        ]])).to(rank).float()
+            target_values = np.zeros((K_spat,K_spat))
+            sort_ind = np.zeros((K_spat,K_spat))
+            dis_li = {}
+            ct = 0
+            for i_ind,i in enumerate(range(K_half_fl*-1,K_half_fl + 1)):
+                for j_ind,j in enumerate(range(K_half_fl*-1,K_half_fl + 1)):
+                    target_values[i_ind,j_ind] = max(1 - math.sqrt(i**2 + j**2)/(math.sqrt(2) * K_half_fl),0)
+                    dis = math.sqrt(i**2 + j**2)
+                    if dis not in dis_li.keys():
+                        dis_li[dis] = ct
+                        ct += 1     
+                    sort_ind[i_ind,j_ind] = int(dis_li[dis])
+            target_values = torch.from_numpy(target_values).to(rank).float()
+            sort_ind = torch.from_numpy(sort_ind).to(rank).long()
 
-            sort_ind = torch.from_numpy(np.array([[5,4,3,4,5],\
-                                      [4,2,1,2,4],\
-                                      [3,1,0,1,3],\
-                                      [4,2,1,2,4],\
-                                      [5,4,3,4,5]])).to(rank)
+
+             # target_values = torch.from_numpy(np.array([[0., 0.20943058, 0.29289322, 0.20943058, 0.        ],\
+            #                    [0.20943058, 0.5       , 0.64644661, 0.5       , 0.20943058],\
+            #                    [0.29289322, 0.64644661, 1.        , 0.64644661, 0.29289322],\
+            #                    [0.20943058, 0.5       , 0.64644661, 0.5       , 0.20943058],\
+            #                    [0.        , 0.20943058, 0.29289322, 0.20943058, 0.        ]])).to(rank).float()
+            #
+            # sort_ind = torch.from_numpy(np.array([[5,4,3,4,5],\
+            #                           [4,2,1,2,4],\
+            #                           [3,1,0,1,3],\
+            #                           [4,2,1,2,4],\
+            #                           [5,4,3,4,5]])).to(rank)
             ind_list = []
 
-            for i in range(-2,3):
+            for i in range(K_half_fl*-1,K_half_fl + 1):
                 tmp=[]
-                for j in range(-2,3):
+                for j in range(K_half_fl*-1,K_half_fl + 1):
                     cat = torch.cat([x+j,y+i,seg_ind],dim=-1)
                     cat = cat[(cat[:,0]>=0) & (cat[:,1]>=0) & (cat[:,0]<self.W) & (cat[:,1]<self.H)]
                     tmp.append(cat)
                 ind_list.append(tmp)
 
         # ind out of bound -1,-1 ?
-            cls_label = torch.zeros((self.H , self.W, depth_segs.shape[1],6)).to(rank)
+            cls_label = torch.zeros((self.H , self.W, depth_segs.shape[1],torch.max(sort_ind)+1)).to(rank)
 
 
             ct = 0
-            for i in range(5):
-                for j in range(5):
+            for i in range(K_spat):
+                for j in range(K_spat):
 
                     inds = ind_list[i][j]
                     cls_label[inds[:,1],inds[:,0],inds[:,2], sort_ind[i,j]] = target_values[i,j]
@@ -472,7 +491,7 @@ class RaySamplerSingleImage(object):
                 cur_time = time.time()
 
 
-            # test = maxs.detach().cpu().numpy()
+            test = maxs.detach().cpu().numpy()
             # test1 = seg_ind.view(self.H, self.W).detach().cpu().numpy()
             # input – input tensor of shape minibatch,in_channels,iW)
 
@@ -490,6 +509,8 @@ class RaySamplerSingleImage(object):
             cls_label_flat_filtered[cls_label_flat_filtered > 1.] = 1.
             cls_label_flat_filtered[cls_label_flat_filtered < 0.] = 0.
 
+            # test15 = cls_label_flat.detach().cpu().numpy()
+
             if time_program:
                 cur_time_sp = time.time() - cur_time
                 print('[TIME] depth filter {}'.format(cur_time_sp))
@@ -504,8 +525,8 @@ class RaySamplerSingleImage(object):
             #     cls_label_flat_filtered_ = cls_label_flat_filtered
 
 
-        # elif pretrain is False:
-        #     cls_label_flat_filtered_ = None
+        elif pretrain is False:
+            cls_label_flat_filtered_ = None
 
         else:
 
