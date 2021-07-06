@@ -1,3 +1,6 @@
+import os
+os.environ['CUDA_VISIBLE_DEVICES']= '1'
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -5,7 +8,7 @@ import torch.optim
 import torch.distributed
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing
-import os
+
 from collections import OrderedDict
 from ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
     NerfNetBoxOnlyWithAutoExpo, DepthOracle
@@ -696,25 +699,25 @@ def create_nerf(rank, args):
 
         to_load = torch.load(fpath, map_location=map_location)
         #
-        # models['optim_oracle'].load_state_dict(to_load['optim_oracle'])
-        # models['net_oracle'].load_state_dict(to_load['net_oracle'])
+        models['optim_oracle'].load_state_dict(to_load['optim_oracle'])
+        models['net_oracle'].load_state_dict(to_load['net_oracle'])
         #
 
 
         ###########################33 before donerf use random weights for nerf ##########    
-        for m in range(models['cascade_level']):
-            for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-                 models[name].load_state_dict(to_load[name])
+        # for m in range(models['cascade_level']):
+        #     for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
+        #          models[name].load_state_dict(to_load[name])
         ####################################################################################333
          #### tmp for reloading pretrained model`
-        # fpath_sc = "./logs/pretrained/scene/model_425000.`pth"
-        #
-        # to_load_sc = torch.load(fpath_sc, map_location=map_location)
-        #
-        # for k in to_load_sc['net_0'].keys():
-        #       to_load['net_0'][k] = to_load_sc['net_1'][k]
-        #
-        # models['net_0'].load_state_dict(to_load['net_0'])
+        fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/sceneonly/model_425000.pth"
+
+        to_load_sc = torch.load(fpath_sc, map_location=map_location)
+
+        for k in to_load_sc['net_0'].keys():
+              to_load['net_0'][k] = to_load_sc['net_1'][k]
+
+        models['net_0'].load_state_dict(to_load['net_0'])
 
         # fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
         # to_load_sc = torch.load(fpath_sc, map_location=map_location)
@@ -729,8 +732,8 @@ def create_nerf(rank, args):
         start = 0
         #
         # map_location = 'cuda:%d' % rank
-        #
-        # fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/fgbg_pts_depscale/model_825000.pth"
+        # #
+        # fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/depth_correct128_dscale30_sameseg_dirnor_test/model_815000.pth"
         # #
         # to_load_dep = torch.load(fpath_dep, map_location=map_location)
         #
@@ -847,7 +850,7 @@ def ddp_train_nerf(rank, args):
     ray_samplers = load_data_split(args.datadir, args.scene, split='train',
                                    try_load_min_depth=args.load_min_depth, have_box=args.have_box,
                                    train_depth=True)
-    val_ray_samplers = load_data_split(args.datadir, args.scene, split='test',
+    val_ray_samplers = load_data_split(args.datadir, args.scene, split='validation_old',
                                        try_load_min_depth=args.load_min_depth, skip=args.testskip, have_box=args.have_box,
                                        train_depth=True)
 
@@ -1270,8 +1273,8 @@ def ddp_train_nerf(rank, args):
 
 
             else:
-                label_fg = label[:, :args.front_sample]
-                label_bg = label[:, args.front_sample:]
+                # label_fg = label[:, :args.front_sample]
+                # label_bg = label[:, args.front_sample:]
                 #if args.depth_training:
                 log_view_to_tb(writer, global_step, rgb,d , gt_depth=val_ray_samplers[idx].get_depth(),
                                gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
@@ -1284,15 +1287,16 @@ def ddp_train_nerf(rank, args):
 
                 else:
 
-                    visualize_depth_label(writer,np.array(label_fg[select_inds].cpu().detach().numpy()),
+                    visualize_depth_label(writer,None,
                                           torch.sigmoid(pred_fg[select_inds]), global_step, 'val/dVis_fg')
-                    visualize_depth_label(writer, np.array(label_bg[select_inds].cpu().detach().numpy()),
+                    visualize_depth_label(writer, None,
                                           torch.sigmoid(pred_bg[select_inds]), global_step, 'val/dVis_bg')
                 #else:
                  #   log_view_to_tb(writer, global_step, log_data, gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
 
             idx = what_train_to_log % len(ray_samplers)
             print('IMAGE_ID-train: {}'.format(idx))
+            time0 = time.time()
 
             with torch.no_grad():
                 rgb, d, pred_fg, pred_bg, label,others = render_single_image(models, ray_samplers[idx], args.chunk_size,
@@ -1408,8 +1412,7 @@ def ddp_train_nerf(rank, args):
 
             else:
 
-                label_fg = label[:, :args.front_sample]
-                label_bg = label[:, args.front_sample:]
+
 
                 # if args.depth_training:
                 log_view_to_tb(writer, global_step, rgb,d, gt_depth=ray_samplers[idx].get_depth(),
@@ -1426,13 +1429,18 @@ def ddp_train_nerf(rank, args):
 
                 else:
 
-                    visualize_depth_label(writer, np.array(label_fg[select_inds].cpu().detach().numpy()),
+                    visualize_depth_label(writer, None,
                                           torch.sigmoid(pred_fg[select_inds]), global_step, 'train/dVis_fg')
-                    visualize_depth_label(writer, np.array(label_bg[select_inds].cpu().detach().numpy()),
+                    visualize_depth_label(writer, None,
                                           torch.sigmoid(pred_bg[select_inds]), global_step, 'train/dVis_bg')
 
 
 
+            del rgb
+            del d
+            del pred_fg
+            del pred_bg
+            del others
             torch.cuda.empty_cache()
 
         if (global_step % args.i_weights == 0 and global_step > 0):

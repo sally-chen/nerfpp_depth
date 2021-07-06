@@ -1,7 +1,7 @@
 ### INPUT
 datadir = /media/diskstation/sally/
-scene = big_inters_nom15_samp4x4_nobox
-expname = depth_correct128_dscale30_sameseg_dirnor
+scene = carla_15x15x20nobox
+expname = depth_correct128_dscale30_sameseg_dirnor_20x20_filt_7
 
 basedir = /home/sally/nerf_clone/nerfpp_depth/logs
 config = None
