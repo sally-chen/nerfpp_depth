@@ -58,7 +58,8 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True):
     return ray_samplers
     # max_depth=max_depth, box_loc=locs[i]))
 
-def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False, have_box = False, train_depth=False, custom_rays=None):
+def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False, have_box = False,
+                    train_depth=False, train_seg = True, custom_rays=None):
 
     def parse_txt(filename):
         assert os.path.isfile(filename)
@@ -122,6 +123,15 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     # img files
     img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg'])
 
+    if train_seg:
+        seg_files = find_files('{}/seg'.format(split_dir), exts=['*.png', '*.jpg'])
+        seg_files = seg_files[::skip]
+        assert (len(seg_files) == cam_cnt)
+
+    else:
+        seg_files = [None, ] * cam_cnt
+
+
     if train_depth:
         depth_files = find_files('{}/depth'.format(split_dir), exts=['*.png', '*.jpg'])
         logger.info('raw depth_files: {}'.format(len(depth_files)))
@@ -181,9 +191,9 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     intrins = []
     locs = []
 
-    # # tmp ##
-    # if cam_cnt > 10:
-    #     cam_cnt = 10
+    # tmp ##
+    if cam_cnt > 100:
+        cam_cnt = 100
 
     ## tmp ##
 
@@ -232,6 +242,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       min_depth_path=mindepth_files[i],
                                                       max_depth=max_depth, box_loc=loc,
                                                       depth_path=depth_files[i],
+                                                      seg_path = seg_files[i],
                                                     make_class_label=False))
 
         else:
@@ -239,8 +250,9 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       img_path=img_files[i],
                                                       mask_path=mask_files[i],
                                                       min_depth_path=mindepth_files[i],
+                                                      seg_path=seg_files[i],
                                                       max_depth=max_depth, depth_path=depth_files[i],
-                                                      make_class_label=True))
+                                                      make_class_label=False))
 
     # logger.info('Split {}, # views: {}'.format(split, cam_cnt))
     #
@@ -249,7 +261,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     # for i, p in enumerate(poses):
     #     poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
     #     # locs[i][:2] = (locs[i][:2] / 0.5 + avg_pose) * (max - min) + min
-    # if not have_box:
+    # # if not have_box:
     # plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
     #                 ['scene poses'])
     #

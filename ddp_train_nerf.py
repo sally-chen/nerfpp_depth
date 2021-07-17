@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES']= '1'
+os.environ['CUDA_VISIBLE_DEVICES']= '0'
 
 import torch
 import torch.nn as nn
@@ -731,14 +731,14 @@ def create_nerf(rank, args):
 
         start = 0
         #
-        # map_location = 'cuda:%d' % rank
-        # #
-        # fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/depth_correct128_dscale30_sameseg_dirnor_test/model_815000.pth"
-        # #
-        # to_load_dep = torch.load(fpath_dep, map_location=map_location)
+        map_location = 'cuda:%d' % rank
         #
-        # models['optim_oracle'].load_state_dict(to_load_dep['optim_oracle'])
-        # models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
+        fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/depth_correct128_dscale30_sameseg_dirnor_20x20_filt_9/model_895000.pth"
+        #
+        to_load_dep = torch.load(fpath_dep, map_location=map_location)
+
+        models['optim_oracle'].load_state_dict(to_load_dep['optim_oracle'])
+        models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
 
         ###########################33 before donerf use random weights for nerf ##########
         # for m in range(models['cascade_level']):
@@ -746,14 +746,14 @@ def create_nerf(rank, args):
         #         models[name].load_state_dict(to_load[name])
         ####################################################################################333
         #### tmp for reloading pretrained model
-        # fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/sceneonly/model_425000.pth"
-        #
-        # to_load_sc = torch.load(fpath_sc, map_location=map_location)
-        #
-        # for k in to_load_sc['net_0'].keys():
-        #       to_load_dep['net_0'][k] = to_load_sc['net_1'][k]
-        #
-        # models['net_0'].load_state_dict(to_load_dep['net_0'])
+        fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/sceneonly/model_425000.pth"
+
+        to_load_sc = torch.load(fpath_sc, map_location=map_location)
+
+        for k in to_load_sc['net_0'].keys():
+              to_load_dep['net_0'][k] = to_load_sc['net_1'][k]
+
+        models['net_0'].load_state_dict(to_load_dep['net_0'])
 
         # fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/big_inters_norm15_comb_rgb_disp/model_775000.pth"
         # to_load_sc = torch.load(fpath_sc, map_location=map_location)
@@ -849,10 +849,10 @@ def ddp_train_nerf(rank, args):
     # HERE SHOULD HAVE ONE HOT EMBEDDING
     ray_samplers = load_data_split(args.datadir, args.scene, split='train',
                                    try_load_min_depth=args.load_min_depth, have_box=args.have_box,
-                                   train_depth=True)
-    val_ray_samplers = load_data_split(args.datadir, args.scene, split='validation_old',
+                                   train_depth=True, train_seg=args.train_seg)
+    val_ray_samplers = load_data_split(args.datadir, args.scene, split='test',
                                        try_load_min_depth=args.load_min_depth, skip=args.testskip, have_box=args.have_box,
-                                       train_depth=True)
+                                       train_depth=True , train_seg=args.train_seg)
 
 
 
@@ -1147,7 +1147,8 @@ def ddp_train_nerf(rank, args):
 
             # select_inds = np.random.choice(640*360, size=(200,), replace=False)
 
-            select_inds = np.arange(640*180,640*181)
+            select_inds = np.arange(640*280,640*281)
+            select_inds2 = np.arange(640*180,640*181)
 
             #### critical: make sure each process is working on the same random image
             time0 = time.time()
@@ -1250,8 +1251,10 @@ def ddp_train_nerf(rank, args):
                     scalars_to_log['val/'+ k + '_bg'] = metrics_bg[k]
 
                 # log_plot_conf_mat(writer, metrics_bg['cm'], global_step, 'val/CM_bg')
-                visualize_depth_label(writer, np.array(label_fg.cpu().detach().numpy())[select_inds], out_likeli_fg[select_inds], global_step, 'val/dVis_fg')
-                visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds], out_likeli_bg[select_inds], global_step, 'val/dVis_bg')
+                visualize_depth_label(writer, np.concatenate([label_fg.cpu().detach().numpy()[select_inds], label_fg.cpu().detach().numpy()[select_inds2]], axis=1),
+                                      np.concatenate([out_likeli_fg[select_inds], out_likeli_fg[select_inds2]], axis=1), global_step, 'val/dVis_fg')
+                visualize_depth_label(writer,np.concatenate([label_bg.cpu().detach().numpy()[select_inds], label_bg.cpu().detach().numpy()[select_inds2]], axis=1),
+                                      np.concatenate([out_likeli_bg[select_inds], out_likeli_bg[select_inds2]], axis=1), global_step, 'val/dVis_bg')
 
                 # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
                 #                out_likeli_fg[select_inds], global_step, 'val/LossVis_fg')
@@ -1280,9 +1283,9 @@ def ddp_train_nerf(rank, args):
                                gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
                                train_box_only=args.train_box_only, prefix='val/',DEBUG=True, others=others)
                 if loss_type is 'ce':
-                    visualize_depth_label(writer, np.array(label_fg[select_inds].cpu().detach().numpy()),
+                    visualize_depth_label(writer, None,
                                           F.softmax(pred_fg[select_inds], dim=-1), global_step, 'val/dVis_fg')
-                    visualize_depth_label(writer, np.array(label_bg[select_inds].cpu().detach().numpy()),
+                    visualize_depth_label(writer, None,
                                           F.softmax(pred_bg[select_inds], dim=-1), global_step, 'val/dVis_bg')
 
                 else:
@@ -1386,10 +1389,19 @@ def ddp_train_nerf(rank, args):
                     scalars_to_log['train/' + k + '_bg'] = metrics_bg[k]
 
                 # log_plot_conf_mat(writer, metrics_bg['cm'], global_step, 'val/CM_bg')
-                visualize_depth_label(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
-                                      out_likeli_fg[select_inds], global_step, 'train/dVis_fg')
-                visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
-                                      out_likeli_bg[select_inds], global_step, 'train/dVis_bg')
+
+                visualize_depth_label(writer, np.concatenate(
+                    [label_fg.cpu().detach().numpy()[select_inds], label_fg.cpu().detach().numpy()[select_inds2]], axis=1),
+                                      np.concatenate([out_likeli_fg[select_inds], out_likeli_fg[select_inds2]], axis=1), global_step, 'train/dVis_fg')
+                visualize_depth_label(writer, np.concatenate(
+                    [label_bg.cpu().detach().numpy()[select_inds], label_bg.cpu().detach().numpy()[select_inds2]], axis=1),
+                                      np.concatenate([out_likeli_bg[select_inds], out_likeli_bg[select_inds2]], axis=1), global_step, 'train/dVis_bg')
+
+
+                # visualize_depth_label(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
+                #                       out_likeli_fg[select_inds], global_step, 'train/dVis_fg')
+                # visualize_depth_label(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
+                #                       out_likeli_bg[select_inds], global_step, 'train/dVis_bg')
                 #
                 # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
                 #                       out_likeli_fg[select_inds], global_step, 'train/LossVis_fg')
@@ -1412,7 +1424,8 @@ def ddp_train_nerf(rank, args):
 
             else:
 
-
+                # label_fg = label[:, :args.front_sample]
+                # label_bg = label[:, args.front_sample:]
 
                 # if args.depth_training:
                 log_view_to_tb(writer, global_step, rgb,d, gt_depth=ray_samplers[idx].get_depth(),
@@ -1431,7 +1444,7 @@ def ddp_train_nerf(rank, args):
 
                     visualize_depth_label(writer, None,
                                           torch.sigmoid(pred_fg[select_inds]), global_step, 'train/dVis_fg')
-                    visualize_depth_label(writer, None,
+                    visualize_depth_label(writer,None,
                                           torch.sigmoid(pred_bg[select_inds]), global_step, 'train/dVis_bg')
 
 
@@ -1548,6 +1561,9 @@ def config_parser():
 
     parser.add_argument("--penc_pts", action='store_true',
                         help='penc segment points')
+
+    parser.add_argument("--train_seg", action='store_true',
+                        help='use segmentation mask to prioritize training')
 
     parser.add_argument("--max_freq_log2_pts", type=int, default=3,
                         help='log2 of max freq for positional encoding (seg points)')

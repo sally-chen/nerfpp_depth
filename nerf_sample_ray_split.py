@@ -71,6 +71,7 @@ class RaySamplerSingleImage(object):
                        box_loc=None,
                        depth_path=None,
                         rays = None,
+                        seg_path = None,
                         make_class_label=None,
 
                         ):
@@ -89,6 +90,8 @@ class RaySamplerSingleImage(object):
         self.min_depth_path = min_depth_path
         self.max_depth = max_depth
 
+        self.seg_path = seg_path
+
         self.resolution_level = -1
         self.set_resolution_level(resolution_level, rays=rays)
 
@@ -96,17 +99,17 @@ class RaySamplerSingleImage(object):
         self.box_loc = box_loc
 
         number = self.img_path[-9:-4]
-        self.label_path = self.img_path[:-13] + 'class_label_sameseg_rayd128_filt7/' + number
+        # self.label_path = self.img_path[:-13] + 'class_label_sameseg_rayd128_final_20x20/' + number
         #
-        # p = os.path.normpath(self.img_path[:-13])
-        # fol = p.split(os.sep)[-1]
-        # self.label_path = '/home/sally/data/' +fol + '/class_label_sameseg_rayd128_filt7/' + number
+        p = os.path.normpath(self.img_path[:-13])
+        fol = p.split(os.sep)[-1]
+        self.label_path = '/home/sally/git/nerfpp_depth/data/' +fol + '/class_label_sameseg_rayd128_filt5_seg/' + number
 
 
         if make_class_label:
 
-            # os.makedirs('/home/sally/data/' +fol+ '/class_label_sameseg_rayd128_filt7/', exist_ok=True)
-            os.makedirs(self.img_path[:-13] + 'class_label_sameseg_rayd128_filt7/', exist_ok=True)
+            os.makedirs('/home/sally/git/nerfpp_depth/data/' +fol+ '/class_label_sameseg_rayd128_filt5_seg/', exist_ok=True)
+            # os.makedirs(self.img_path[:-13] + 'class_label_sameseg_rayd128_final_20x20/', exist_ok=True)
             self.get_classifier_label_torch(N_front_sample=128, N_back_sample=128, pretrain=True, save=True)
 
 
@@ -154,6 +157,15 @@ class RaySamplerSingleImage(object):
 
                 self.depth_sphere = intersect_sphere(self.rays_o, self.rays_d)
 
+            self.pole_inds = None
+            if self.seg_path is not None:
+                seg_map = np.array(imageio.imread(self.seg_path)[..., 0]).reshape(-1)
+                self.pole_inds = (seg_map == 5).nonzero()[0]
+
+                print( self.pole_inds.shape[0])
+
+                if self.pole_inds.shape[0] == 0:
+                    self.pole_inds = None
 
 
 
@@ -431,7 +443,7 @@ class RaySamplerSingleImage(object):
             # ones = torch.cat([x.unsqueeze(-1),y.unsqueeze(-1),seg_ind.unsqueeze(-1)],dim=-1)
 
             ## you can technically loop through ones and compute that function
-            K_spat = 7
+            K_spat = 5
             K_half_fl = int(np.floor(K_spat/2))
 
             target_values = np.zeros((K_spat,K_spat))
@@ -491,7 +503,7 @@ class RaySamplerSingleImage(object):
                 cur_time = time.time()
 
 
-            test = maxs.detach().cpu().numpy()
+            # test = maxs.detach().cpu().numpy()
             # test1 = seg_ind.view(self.H, self.W).detach().cpu().numpy()
             # input – input tensor of shape minibatch,in_channels,iW)
 
@@ -564,7 +576,24 @@ class RaySamplerSingleImage(object):
     def random_sample_classifier(self,N_rand, N_front_sample, N_back_sample,pretrain,rank):
 
 
-        select_inds = np.random.choice(self.H * self.W, size=(N_rand,), replace=False)
+        if self.pole_inds is not None:
+            all_ind = np.delete(np.arange(self.H * self.W), self.pole_inds)
+            num_pix_pole = self.pole_inds.shape[0]
+
+            if num_pix_pole > N_rand * 0.5:
+                select_ind_pole = np.random.choice(self.pole_inds, size=(int(N_rand * 0.5),), replace=False)
+                select_inds = np.random.choice(all_ind, size=(int(N_rand * 0.5),), replace=False)
+                select_inds = np.concatenate([select_inds, select_ind_pole])
+
+            else:
+
+                num_sel = N_rand - self.pole_inds.shape[0]
+                select_inds = np.concatenate([np.random.choice(all_ind , size=(num_sel,), replace=False), self.pole_inds])
+        else:
+            select_inds = np.random.choice(self.H * self.W, size=(N_rand,), replace=False)
+
+
+
         with torch.no_grad():
             axis_filtered_depth_flat, fg_pts_flat, bg_pts_flat, bg_z_vals_centre, fg_z_vals_centre = \
                self.get_classifier_label_torch( N_front_sample, N_back_sample, pretrain, select_inds=select_inds, rank=rank)
