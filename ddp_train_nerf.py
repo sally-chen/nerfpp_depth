@@ -733,19 +733,19 @@ def create_nerf(rank, args):
         #
         map_location = 'cuda:%d' % rank
         #
-        fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/depth_correct128_dscale30_sameseg_dirnor_20x20_filt_9/model_895000.pth"
+        fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt5/model_450000.pth"
         #
         to_load_dep = torch.load(fpath_dep, map_location=map_location)
 
         models['optim_oracle'].load_state_dict(to_load_dep['optim_oracle'])
         models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
 
-        ###########################33 before donerf use random weights for nerf ##########
+        ##########################33 before donerf use random weights for nerf ##########
         # for m in range(models['cascade_level']):
         #     for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
         #         models[name].load_state_dict(to_load[name])
-        ####################################################################################333
-        #### tmp for reloading pretrained model
+        ###################################################################################333
+        ### tmp for reloading pretrained model
         fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/sceneonly/model_425000.pth"
 
         to_load_sc = torch.load(fpath_sc, map_location=map_location)
@@ -1256,11 +1256,6 @@ def ddp_train_nerf(rank, args):
                 visualize_depth_label(writer,np.concatenate([label_bg.cpu().detach().numpy()[select_inds], label_bg.cpu().detach().numpy()[select_inds2]], axis=1),
                                       np.concatenate([out_likeli_bg[select_inds], out_likeli_bg[select_inds2]], axis=1), global_step, 'val/dVis_bg')
 
-                # loss_deviation(writer, np.array(label_fg.cpu().detach().numpy())[select_inds],
-                #                out_likeli_fg[select_inds], global_step, 'val/LossVis_fg')
-                # loss_deviation(writer, np.array(label_bg.cpu().detach().numpy())[select_inds],
-                #                out_likeli_bg[select_inds], global_step, 'val/LossVis_bg')
-
 
                 logstr = '[=VALIDATION=] {} step: {} '.format(args.expname, global_step)
                 for k in scalars_to_log:
@@ -1276,8 +1271,8 @@ def ddp_train_nerf(rank, args):
 
 
             else:
-                # label_fg = label[:, :args.front_sample]
-                # label_bg = label[:, args.front_sample:]
+                label_fg = label[:, :args.front_sample]
+                label_bg = label[:, args.front_sample:]
                 #if args.depth_training:
                 log_view_to_tb(writer, global_step, rgb,d , gt_depth=val_ray_samplers[idx].get_depth(),
                                gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
@@ -1290,10 +1285,29 @@ def ddp_train_nerf(rank, args):
 
                 else:
 
-                    visualize_depth_label(writer,None,
-                                          torch.sigmoid(pred_fg[select_inds]), global_step, 'val/dVis_fg')
-                    visualize_depth_label(writer, None,
-                                          torch.sigmoid(pred_bg[select_inds]), global_step, 'val/dVis_bg')
+
+                    visualize_depth_label(writer, np.concatenate(
+                        [label_fg.cpu().detach().numpy()[select_inds], label_fg.cpu().detach().numpy()[select_inds2]],axis=1),
+                                          np.concatenate([torch.sigmoid(pred_fg[select_inds]),
+                                                          torch.sigmoid(pred_fg[select_inds2])],
+                                                         axis=1), global_step, 'val/dVis_fg')
+                    visualize_depth_label(writer, np.concatenate(
+                        [label_bg.cpu().detach().numpy()[select_inds], label_bg.cpu().detach().numpy()[select_inds2]],
+                        axis=1),
+                                          np.concatenate([torch.sigmoid(pred_bg[select_inds]),
+                                                          torch.sigmoid(pred_bg[select_inds2])],
+                                                         axis=1), global_step, 'val/dVis_fg')
+
+                    # visualize_depth_label(writer, None,
+                    #                           np.concatenate([torch.sigmoid(pred_fg[select_inds]),
+                    #                                           torch.sigmoid(pred_fg[select_inds2])],
+                    #                                          axis=1), global_step, 'val/dVis_fg')
+                    # visualize_depth_label(writer, None,
+                    #                           np.concatenate([torch.sigmoid(pred_bg[select_inds]),
+                    #                                           torch.sigmoid(pred_bg[select_inds2])],
+                    #                                          axis=1), global_step, 'val/dVis_fg')
+
+
                 #else:
                  #   log_view_to_tb(writer, global_step, log_data, gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box, train_box_only=args.train_box_only, prefix='val/')
 
@@ -1424,8 +1438,8 @@ def ddp_train_nerf(rank, args):
 
             else:
 
-                # label_fg = label[:, :args.front_sample]
-                # label_bg = label[:, args.front_sample:]
+                label_fg = label[:, :args.front_sample]
+                label_bg = label[:, args.front_sample:]
 
                 # if args.depth_training:
                 log_view_to_tb(writer, global_step, rgb,d, gt_depth=ray_samplers[idx].get_depth(),
@@ -1441,11 +1455,26 @@ def ddp_train_nerf(rank, args):
                                           F.softmax(pred_bg[select_inds], dim=-1), global_step, 'train/dVis_bg')
 
                 else:
+                    visualize_depth_label(writer, np.concatenate(
+                        [label_fg.cpu().detach().numpy()[select_inds], label_fg.cpu().detach().numpy()[select_inds2]],axis=1),
+                        np.concatenate([torch.sigmoid(pred_fg[select_inds]), torch.sigmoid(pred_fg[select_inds2])],
+                                                         axis=1), global_step, 'train/dVis_fg')
+                    visualize_depth_label(writer, np.concatenate(
+                        [label_bg.cpu().detach().numpy()[select_inds], label_bg.cpu().detach().numpy()[select_inds2]],axis=1),
+                                          np.concatenate([torch.sigmoid(pred_bg[select_inds]),
+                                                          torch.sigmoid(pred_bg[select_inds2])],
+                                                         axis=1), global_step, 'train/dVis_fg')
 
-                    visualize_depth_label(writer, None,
-                                          torch.sigmoid(pred_fg[select_inds]), global_step, 'train/dVis_fg')
-                    visualize_depth_label(writer,None,
-                                          torch.sigmoid(pred_bg[select_inds]), global_step, 'train/dVis_bg')
+                    # visualize_depth_label(writer, None,
+                    #                       np.concatenate([torch.sigmoid(pred_fg[select_inds]),
+                    #                                       torch.sigmoid(pred_fg[select_inds2])],
+                    #                                      axis=1), global_step, 'train/dVis_fg')
+                    # visualize_depth_label(writer, None,
+                    #                       np.concatenate([torch.sigmoid(pred_bg[select_inds]),
+                    #                                       torch.sigmoid(pred_bg[select_inds2])],
+                    #                                      axis=1), global_step, 'train/dVis_fg')
+
+
 
 
 
