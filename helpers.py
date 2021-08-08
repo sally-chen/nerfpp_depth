@@ -24,12 +24,12 @@ def plot_mult_pose(poses_list, name, labels):
 
 def plot_single_pose(poses, color, ax, label):
     # poses shape N, 3, 4
-    ax.scatter(poses[:, 0, 3], poses[:, 1, 3], poses[:, 2, 3], marker='o', color=color, label=label)
+    ax.scatter(poses[:, 0, 3], poses[:, 1, 3], poses[:, 2, 3], marker='o', color='red', label=label)
     #
-    # for i in range(poses.shape[0]):
-    #     ax.plot([poses[i, 0, 3], poses[i, 0, 3] + poses[i, 0, 2]],
-    #             [poses[i, 1, 3], poses[i, 1, 3] + poses[i, 1, 2]],
-    #             [poses[i, 2, 3], poses[i, 2, 3] + poses[i, 2, 2]], color=color)
+    for i in range(poses.shape[0]):
+        ax.plot([poses[i, 0, 3], poses[i, 0, 3] + poses[i, 0, 2]],
+                [poses[i, 1, 3], poses[i, 1, 3] + poses[i, 1, 2]],
+                [poses[i, 2, 3], poses[i, 2, 3] + poses[i, 2, 2]], color='blue')
 
 
 def plot_ray_batch(batch):

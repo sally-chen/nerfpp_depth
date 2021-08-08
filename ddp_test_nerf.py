@@ -57,7 +57,8 @@ def ddp_test_nerf(rank, args):
                 continue
 
             time0 = time.time()
-            rgb, d, pred_fg, pred_bg, label, others = render_single_image(models, ray_samplers[idx],
+            with torch.no_grad():
+                rgb, d, pred_fg, pred_bg, label, others = render_single_image(models, ray_samplers[idx],
                                                                           args.chunk_size,
                                                                           args.train_box_only, have_box=args.have_box,
                                                                           donerf_pretrain=args.donerf_pretrain,
@@ -100,20 +101,20 @@ def ddp_test_nerf(rank, args):
                 # im = to8b(im)
                 # imageio.imwrite(os.path.join(out_dir, 'bg_depth_' + fname), im)
 
-                depth_clip=100.
-                im = d['depth_fgbg'].numpy()
-                im[im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
-
-                im = colorize_np(im, cmap_name='jet', append_cbar=True)
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, 'Depth_' + fname), im)
-
-                im = ray_samplers[idx].get_depth()
-                im[im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
-
-                im = colorize_np(im, cmap_name='jet', append_cbar=True)
-                im = to8b(im)
-                imageio.imwrite(os.path.join(out_dir, 'DepthGT_' + fname), im)
+                # depth_clip=100.
+                # im = d['depth_fgbg'].numpy()
+                # im[im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
+                #
+                # im = colorize_np(im, cmap_name='jet', append_cbar=True)
+                # im = to8b(im)
+                # imageio.imwrite(os.path.join(out_dir, 'Depth_' + fname), im)
+                #
+                # im = ray_samplers[idx].get_depth()
+                # im[im > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
+                #
+                # im = colorize_np(im, cmap_name='jet', append_cbar=True)
+                # im = to8b(im)
+                # imageio.imwrite(os.path.join(out_dir, 'DepthGT_' + fname), im)
 
             torch.cuda.empty_cache()
 

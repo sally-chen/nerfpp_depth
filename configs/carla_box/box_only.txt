@@ -1,28 +1,23 @@
 ### INPUT
-datadir = ./data/box/
-scene = box_300_2-1_fullview_sc0.5_mx100-140
-expname = box_300_2-1_fullview_sc0.5_mx100-140
-
-#datadir = ./data/tanks_and_temples
-#scene = tat_training_Truck
-#expname = tat_training_Truck
-
-basedir = ./logs
+datadir = /home/sally/nerf_clone/nerfpp_depth/data/blenderobj/ #/media/diskstation/sally/
+scene = parsed_norm30_cam2-0_dep1.1-2.7 #carla_15x15x20_nobox_parses_seg #big_inters_nom15_samp4x4
+expname = box_only_train_norm3_K=9Z=5_rgb
+basedir = /home/sally/nerf_clone/nerfpp_depth/logs
 config = None
 ckpt_path = None
 no_reload = False
 testskip = 1
 
 ### TRAINING
-N_iters = 500001
-N_rand = 4096
+N_iters = 1000001
+N_rand = 2048
 lrate = 0.0005
 lrate_decay_factor = 0.1
-lrate_decay_steps = 50000000
+lrate_decay_steps = 5000
 
 ### CASCADE
-cascade_level = 2
-cascade_samples = 64,128
+cascade_level = 1
+cascade_samples = 128
 
 ### TESTING
 chunk_size = 8192
@@ -36,11 +31,27 @@ netwidth = 256
 use_viewdirs = True
 
 ### CONSOLE AND TENSORBOARD
-i_img = 1000
-i_print = 100
+i_img = 500
+i_print = 50
 i_weights = 5000
 
 
 have_box = False
 train_box_only = True
+depth_training = False
+donerf_pretrain = False
+
+front_sample = 128
+back_sample = 128
+
+fg_bg_net = True
+
+pencode = False
+use_zval = False
+
+penc_pts = False
+max_freq_log2_pts=3
+world_size=1
+
+train_seg = False
 
