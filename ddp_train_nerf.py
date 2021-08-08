@@ -1046,15 +1046,15 @@ def ddp_train_nerf(rank, args):
                     box_weights = ret_box['fg_box_sig']
                     fg_weights = fg_weights + normalize_torch(box_weights)
 
-                    # opt 2:
-
-                    ret_box = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'],
-                                  ray_batch['fg_z_vals_centre'][:, ::2],
-                                  bg_z_vals=None, box_loc=ray_batch['box_loc'],
-                                  query_box_only=True, img_name=ray_batch['img_name'])
-                    box_weights = torch.cat([ret_box['fg_box_sig'], ret_box['fg_box_sig']], dim=2)
-                    box_weights = box_weights.view(box_weights.shape[0], box_weights.shape[1]*2)
-                    fg_weights = fg_weights + normalize_torch(box_weights)
+                    # # opt 2:
+                    #
+                    # ret_box = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'],
+                    #               ray_batch['fg_z_vals_centre'][:, ::2],
+                    #               bg_z_vals=None, box_loc=ray_batch['box_loc'],
+                    #               query_box_only=True, img_name=ray_batch['img_name'])
+                    # box_weights = torch.cat([ret_box['fg_box_sig'], ret_box['fg_box_sig']], dim=2)
+                    # box_weights = box_weights.view(box_weights.shape[0], box_weights.shape[1]*2)
+                    # fg_weights = fg_weights + normalize_torch(box_weights)
 
                     #opt 3 get weights from donerf
 

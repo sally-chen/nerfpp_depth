@@ -1,7 +1,7 @@
 ### INPUT
 datadir = /media/diskstation/sally/
-scene = big_inters_nom15_samp4x4 #carla_15x15x20_nobox_parses_seg
-expname = box_composite
+scene = carla_15x15x20_box #big_inters_nom15_samp4x4 #carla_15x15x20_nobox_parses_seg
+expname = box_composite_128
 basedir = /home/sally/nerf_clone/nerfpp_depth/logs
 config = None
 ckpt_path = None

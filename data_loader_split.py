@@ -192,8 +192,8 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     locs = []
 
     # tmp ##
-    # if cam_cnt > 5:
-    #     cam_cnt = 5
+    # if cam_cnt > 1000:
+    #     cam_cnt = 1000
 
     ## tmp ##
 
@@ -270,13 +270,13 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
     # for i, p in enumerate(poses):
     #     poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
-
+    #
     #     if have_box:
     #         locs[i][:2] = (locs[i][:2] / 0.5 + avg_pose) * (max - min) + min
-    if not have_box:
-        plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
-                    ['scene poses'])
-    #
+    # if not have_box:
+    #     plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
+    #                 ['scene poses'])
+    # #
     # else:
     #     dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
     #     locs = np.stack(locs, axis=0)
