@@ -269,29 +269,103 @@ class NerfNet(nn.Module):
         _, bg_depth_map = depth2pts_outside(ray_o, ray_d, bg_depth_map)
         depth_map = fg_depth_map + bg_lambda * bg_depth_map
 
-        device_num = torch.cuda.current_device()
-        max = torch.tensor([100., 140.]).to(device_num)
-        min = torch.tensor([85., 125.]).to(device_num)
-        avg_pose = torch.tensor([0.5,  0.5]).to(device_num)
-
-        obj_pt_norm = ray_o + depth_map.unsqueeze(-1) * ray_d
-
-        obj_pt_denorm = obj_pt_norm.clone()
-        obj_pt_denorm[:,:2] = (obj_pt_norm[:,:2]/ 0.5 + avg_pose) * 15.
-        ro_denorm = ray_o.clone()
-        ro_denorm[:,:2]   = ((ray_o[:,:2]) / 0.5 + avg_pose) * 15.
-        depth_map = torch.norm(obj_pt_denorm - ro_denorm, dim=1, keepdim=False)
+        # device_num = torch.cuda.current_device()
+        # max = torch.tensor([100., 140.]).to(device_num)
+        # min = torch.tensor([85., 125.]).to(device_num)
+        # avg_pose = torch.tensor([0.5,  0.5]).to(device_num)
+        #
+        # obj_pt_norm = ray_o + depth_map.unsqueeze(-1) * ray_d
+        #
+        # obj_pt_denorm = obj_pt_norm.clone()
+        # obj_pt_denorm[:,:2] = (obj_pt_norm[:,:2]/ 0.5 + avg_pose) * 15.
+        # ro_denorm = ray_o.clone()
+        # ro_denorm[:,:2]   = ((ray_o[:,:2]) / 0.5 + avg_pose) * 15.
+        # depth_map = torch.norm(obj_pt_denorm - ro_denorm, dim=1, keepdim=False)
 
 
         ret = OrderedDict([('rgb', rgb_map),  # loss
                            ('fg_weights', fg_weights),  # importance sampling
                            ('bg_weights', bg_weights),  # importance sampling
                            ('fg_rgb', fg_rgb_map),  # below are for logging
-                           ('fg_depth', fg_depth_map),
+                           ('fg_depth', fg_depth_map * 30.),
                            ('bg_rgb', bg_rgb_map),
-                           ('bg_depth', bg_depth_map),
+                           ('bg_depth', bg_depth_map * 30.),
                            ('bg_lambda', bg_lambda),
-                           ('depth_fgbg', depth_map)])
+                           ('depth_fgbg', depth_map * 30. )])
+        return ret
+
+
+class DepthOracleBoxOnly(nn.Module):
+
+    def __init__(self, args):
+        super().__init__()
+
+        self.pencode = args.pencode
+        self.penc_pts = args.penc_pts
+
+        self.use_zval = args.use_zval
+
+        if self.use_zval:
+            pos_ch_fg = args.front_sample - 1
+
+        else:
+            pos_ch_fg = (args.front_sample - 1) * 3
+
+
+        if self.penc_pts:
+            self.embedder_pts = Embedder(input_dim=pos_ch_fg,
+                                         max_freq_log2=args.max_freq_log2_pts - 1,
+                                         N_freqs=args.max_freq_log2_pts)
+
+            pos_ch_fg = self.embedder_pts.out_dim
+
+
+        if self.pencode:
+            self.embedder_position = Embedder(input_dim=3,
+                                              max_freq_log2=args.max_freq_log2 - 1,
+                                              N_freqs=args.max_freq_log2)
+            self.embedder_viewdir = Embedder(input_dim=3,
+                                             max_freq_log2=args.max_freq_log2_viewdirs - 1,
+                                             N_freqs=args.max_freq_log2_viewdirs)
+
+            self.ora_net_fg = MLPNetClassier(input_ch=self.embedder_position.out_dim,
+                                             input_ch_viewdirs=self.embedder_viewdir.out_dim, D=args.netdepth,
+                                             W=args.netwidth,
+                                             pos_ch=pos_ch_fg,
+                                             out_dim=args.front_sample)
+
+        else:
+
+            self.ora_net_fg = MLPNetClassier(D=args.netdepth, W=args.netwidth,
+                                             pos_ch=pos_ch_fg,
+                                             out_dim=args.front_sample)
+
+
+    def forward(self, ray_o, ray_d, points_fg):
+        '''
+       :param ray_o, ray_d: [N_rays, 3]
+       :param cls_label: [N_rays, N_samples]
+       :param points: [N_rays, 3*N_front_sample +4 * N_back_samples]
+       :return
+       '''
+
+        # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
+        ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
+        viewdirs = ray_d / ray_d_norm  # [..., 3]
+
+        if self.pencode:
+            viewdirs = self.embedder_viewdir(viewdirs)
+            ray_o = self.embedder_position(ray_o)
+
+
+        if self.penc_pts:
+            points_fg = self.embedder_pts(points_fg)
+
+        depth_likeli_fg = self.ora_net_fg(ray_o, viewdirs, points_fg)
+
+
+        ret = OrderedDict([('likeli_fg', depth_likeli_fg)])
+
         return ret
 
 
@@ -344,7 +418,7 @@ class NerfNetBoxOnly(nn.Module):
                                           dim=-1)  # [..., N_samples]
         fg_alpha = 1. - torch.exp(-fg_raw['sigma'] * fg_dists)  # [..., N_samples]
         T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)  # [..., N_samples]
-        bg_lambda = T[..., -1]
+
         T = torch.cat((torch.ones_like(T[..., 0:1]), T[..., :-1]), dim=-1)  # [..., N_samples]
         fg_weights = fg_alpha * T  # [..., N_samples]
         fg_rgb_map = torch.sum(fg_weights.unsqueeze(-1) * fg_raw['rgb'], dim=-2)  # [..., 3]
@@ -358,7 +432,7 @@ class NerfNetBoxOnly(nn.Module):
         ret = OrderedDict([('rgb', rgb_map),  # loss
                            ('fg_weights', fg_weights),  # importance sampling
                            ('fg_rgb', fg_rgb_map),  # below are for logging
-                           ('fg_depth', fg_depth_map)])
+                           ('fg_depth', fg_depth_map*30.)])
         return ret
 
 
@@ -420,7 +494,7 @@ class NerfNetBox(nn.Module):
         # get output from boxnet
         # convert to the box coordinate
         box_offset = (fg_pts - box_loc.unsqueeze(
-            -2)) * 0.5  # 0.5 is because the box model was trained in different coordinates before?
+            -2)) * 0.5  # 0.5 is because the box model was trained in different coordinates before
         input_box = torch.cat((self.fg_embedder_position(box_offset),
                                self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
         fg_box_raw = self.box_net(input_box.float())
@@ -497,15 +571,15 @@ class NerfNetBox(nn.Module):
         ## combine foregroung and background in the right depth unit s well
 
         ## need inverse normalization
-        device_num = torch.cuda.current_device()
-
-        max = torch.tensor([100., 140.]).to(device_num)
-        min = torch.tensor([85., 125.]).to(device_num)
-        avg_pose = torch.tensor([0.5, 0.5]).to(device_num)
-
-        depth_pt_denorm = ((ray_o[:, :2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * ( max - min) + min
-        ro_denorm = ((ray_o[:, :2]) / 0.5 + avg_pose) * (max - min) + min
-        depth_map = torch.norm(depth_pt_denorm[:, :2] - ro_denorm, dim=1, keepdim=False)
+        # device_num = torch.cuda.current_device()
+        #
+        # max = torch.tensor([100., 140.]).to(device_num)
+        # min = torch.tensor([85., 125.]).to(device_num)
+        # avg_pose = torch.tensor([0.5, 0.5]).to(device_num)
+        #
+        # depth_pt_denorm = ((ray_o[:, :2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * ( max - min) + min
+        # ro_denorm = ((ray_o[:, :2]) / 0.5 + avg_pose) * (max - min) + min
+        # depth_map = torch.norm(depth_pt_denorm[:, :2] - ro_denorm, dim=1, keepdim=False)
         #
         # ##
         # ret = [rgb_map,fg_weights,bg_weights,fg_rgb_map,fg_depth_map,bg_rgb_map,bg_depth_map,bg_lambda,depth_map]
@@ -514,11 +588,11 @@ class NerfNetBox(nn.Module):
                            ('fg_weights', fg_weights),  # importance sampling
                            ('bg_weights', bg_weights),  # importance sampling
                            ('fg_rgb', fg_rgb_map),  # below are for logging
-                           ('fg_depth', fg_depth_map),
+                           ('fg_depth', fg_depth_map*30.),
                            ('bg_rgb', bg_rgb_map),
-                           ('bg_depth', bg_depth_map),
+                           ('bg_depth', bg_depth_map*30.),
                            ('bg_lambda', bg_lambda),
-                           ('depth_fgbg', depth_map)])
+                           ('depth_fgbg', depth_map*30.)])
         return ret
 
 

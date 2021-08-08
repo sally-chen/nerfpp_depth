@@ -1,8 +1,7 @@
 ### INPUT
 datadir = /media/diskstation/sally/
-scene = carla_15x15x20_nobox_parses_seg
-expname = seg_test_filt5
-
+scene = big_inters_nom15_samp4x4 #carla_15x15x20_nobox_parses_seg
+expname = box_composite
 basedir = /home/sally/nerf_clone/nerfpp_depth/logs
 config = None
 ckpt_path = None
@@ -11,7 +10,7 @@ testskip = 1
 
 ### TRAINING
 N_iters = 1000001
-N_rand = 10240
+N_rand = 1024
 lrate = 0.0005
 lrate_decay_factor = 0.1
 lrate_decay_steps = 5000
@@ -37,10 +36,10 @@ i_print = 50
 i_weights = 5000
 
 
-have_box = False
+have_box = True
 train_box_only = False
 depth_training = False
-donerf_pretrain = True
+donerf_pretrain = False
 
 front_sample = 128
 back_sample = 128
@@ -54,5 +53,5 @@ penc_pts = False
 max_freq_log2_pts=3
 world_size=1
 
-train_seg = True
+train_seg = False
 

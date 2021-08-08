@@ -59,7 +59,7 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True):
     # max_depth=max_depth, box_loc=locs[i]))
 
 def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False, have_box = False,
-                    train_depth=False, train_seg = True, custom_rays=None):
+                    train_depth=False, train_seg = False,  train_box_only=False, custom_rays=None):
 
     def parse_txt(filename):
         assert os.path.isfile(filename)
@@ -192,8 +192,8 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     locs = []
 
     # tmp ##
-    if cam_cnt > 100:
-        cam_cnt = 100
+    # if cam_cnt > 5:
+    #     cam_cnt = 5
 
     ## tmp ##
 
@@ -208,9 +208,9 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         intrinsics = parse_txt(intrinsics_files[i])
         pose = parse_txt(pose_files[i])
 
-        p = (pose[:2, 3] / 0.5 + avg_pose) * (max - min) + min
-        if (p[0] > 95. and p[1] > 138) or (p[0] > 95. and p[1] < 125):
-            continue
+        # p = (pose[:2, 3] / 0.5 + avg_pose) * (max - min) + min
+        # if (p[0] > 95. and p[1] > 136) or (p[0] > 95. and p[1] < 128) or (p[0] > 105) or (p[0] < 86):
+        #     continue
         count += 1
         ################## rand ##############33
         #pose[:2,3] = pose[:2,3] * 0.5
@@ -235,7 +235,20 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
             max_depth = None
 
 
-        if have_box:
+
+        if train_box_only:
+
+            ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
+                                                      img_path=img_files[i],
+                                                      mask_path=mask_files[i],
+                                                      min_depth_path=mindepth_files[i],
+                                                      max_depth=max_depth, box_loc=None,
+                                                      depth_path=depth_files[i],
+                                                      seg_path=seg_files[i], train_box_only=True,
+                                                      make_class_label=False))
+
+
+        elif have_box:
             ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
                                                       img_path=img_files[i],
                                                       mask_path=mask_files[i],
@@ -254,16 +267,15 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       max_depth=max_depth, depth_path=depth_files[i],
                                                       make_class_label=False))
 
-    # logger.info('Split {}, # views: {}'.format(split, cam_cnt))
-    #
 
-    #
     # for i, p in enumerate(poses):
     #     poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
-    #     # locs[i][:2] = (locs[i][:2] / 0.5 + avg_pose) * (max - min) + min
-    # # if not have_box:
-    # plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
-    #                 ['scene poses'])
+
+    #     if have_box:
+    #         locs[i][:2] = (locs[i][:2] / 0.5 + avg_pose) * (max - min) + min
+    if not have_box:
+        plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
+                    ['scene poses'])
     #
     # else:
     #     dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
