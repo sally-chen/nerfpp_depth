@@ -251,7 +251,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
 
 
     # fg_weights = normalize_torch(fg_weights)
-    fg_weights = torch.sigmoid(fg_weights) + 0.01
+    fg_weights = torch.sigmoid(fg_weights)
 
     fg_weights[fg_z_vals_centre < 0.0002] = 0.0
 
@@ -261,7 +261,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
 
 
 
-    fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights[:, 1:front_sample-1]+0.01,
+    fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights[:, 1:front_sample-1],
                           N_samples=samples, det=False))  # [..., N_samples]
 
 
@@ -421,8 +421,8 @@ def ddp_train_nerf(rank, args):
 
         if args.donerf_pretrain:
 
-            if args.train_box_only:
-                ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+
+            ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
                                  ray_batch['fg_pts_flat'].float())
 
 
@@ -461,7 +461,7 @@ def ddp_train_nerf(rank, args):
             # fg_weights = ray_batch['cls_label'][:,:args.front_sample]
             fg_weights = ret['likeli_fg']
 
-            fg_weights = torch.sigmoid(fg_weights).clone().detach() + 0.01
+            fg_weights = torch.sigmoid(fg_weights).clone().detach()
 
             fg_weights[ray_batch['fg_z_vals_centre']<0.0002] = 0.
 

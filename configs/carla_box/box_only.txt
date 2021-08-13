@@ -1,7 +1,7 @@
 ### INPUT
 datadir = /home/sally/nerf_clone/nerfpp_depth/data/blenderobj/ #/media/diskstation/sally/
 scene = parsed_norm30_cam2-0_dep1.1-2.7 #carla_15x15x20_nobox_parses_seg #big_inters_nom15_samp4x4
-expname = box_only_train_norm3_K=9Z=5_rgb32
+expname = box_only_train_norm30_K=9Z=9_bg127_rgb
 basedir = /home/sally/nerf_clone/nerfpp_depth/logs
 config = None
 ckpt_path = None
@@ -17,7 +17,7 @@ lrate_decay_steps = 5000
 
 ### CASCADE
 cascade_level = 1
-cascade_samples = 32
+cascade_samples = 128
 
 ### TESTING
 chunk_size = 8192
@@ -31,7 +31,7 @@ netwidth = 256
 use_viewdirs = True
 
 ### CONSOLE AND TENSORBOARD
-i_img = 500
+i_img = 1000
 i_print = 50
 i_weights = 5000
 
