@@ -84,6 +84,48 @@ def depth2pts_outside_np(ray_o, ray_d, depth):
     return pts, depth_real
 
 
+class DepthOracleWithBox(nn.Module):
+
+    def __init__(self, args):
+        super().__init__()
+
+
+        pos_ch_fg = (args.front_sample - 1) * 3
+        pos_ch_bg = (args.back_sample - 1) * 4
+
+        self.ora_net_fg = MLPNetClassier(D=args.netdepth, W=args.netwidth,
+                                         pos_ch=pos_ch_fg + 2 , # box x,y
+                                         out_dim=args.front_sample)
+
+        self.ora_net_bg = MLPNetClassier(D=args.netdepth, W=args.netwidth,
+                                         pos_ch=pos_ch_bg,
+                                         out_dim=args.back_sample)
+
+    def forward(self, ray_o, ray_d, points_fg, points_bg, fg_far_depth, box_loc):
+        '''
+       :param ray_o, ray_d: [N_rays, 3]
+       :param cls_label: [N_rays, N_samples]
+       :param points: [N_rays, 3*N_front_sample +4 * N_back_samples]
+       :return
+       '''
+
+        # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
+        ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
+        viewdirs = ray_d / ray_d_norm  # [..., 3]
+
+        ray_o_bg = ray_o + ray_d * fg_far_depth.unsqueeze(-1)
+
+        pt_fg_loc = torch.cat([points_fg, box_loc], dim=-1)
+
+        depth_likeli_fg = self.ora_net_fg(ray_o, viewdirs, pt_fg_loc)
+        depth_likeli_bg = self.ora_net_bg(ray_o_bg, viewdirs, points_bg)
+
+        ret = OrderedDict([('likeli_fg', depth_likeli_fg), ('likeli_bg', depth_likeli_bg)])
+
+        return ret
+
+
+
 
 class DepthOracle(nn.Module):
 

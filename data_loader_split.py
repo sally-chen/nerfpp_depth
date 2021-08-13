@@ -192,8 +192,8 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     locs = []
 
     # tmp ##
-    # if cam_cnt > 1000:
-    #     cam_cnt = 1000
+    if cam_cnt > 5:
+        cam_cnt = 5
 
     ## tmp ##
 
@@ -245,7 +245,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       max_depth=max_depth, box_loc=None,
                                                       depth_path=depth_files[i],
                                                       seg_path=seg_files[i], train_box_only=True,
-                                                      make_class_label=False))
+                                                      make_class_label=True))
 
 
         elif have_box:

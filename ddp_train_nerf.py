@@ -11,7 +11,7 @@ import torch.multiprocessing
 
 from collections import OrderedDict
 from ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
-    NerfNetBoxOnlyWithAutoExpo, DepthOracle, DepthOracleBoxOnly
+    NerfNetBoxOnlyWithAutoExpo, DepthOracle, DepthOracleBoxOnly, DepthOracleWithBox
 
 from nerf_network import WrapperModule
 
@@ -154,7 +154,7 @@ def render_single_image(models, ray_sampler, chunk_size,
 
     rays = ray_sampler.get_all_classifier(front_sample,
                                           back_sample,
-                                          pretrain=False, rank=rank, train_box_only=train_box_only)
+                                          pretrain=donerf_pretrain, rank=rank, train_box_only=train_box_only)
 
     chunks = (len(rays['ray_d']) + chunk_size - 1) // chunk_size
     rays_split = [OrderedDict() for _ in range(chunks)]
@@ -246,7 +246,7 @@ def render_single_image(models, ray_sampler, chunk_size,
 
     return rgb, d, likeli_fg, likeli_bg, rays['cls_label'], None
 
-def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sample, train_box_only):
+def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sample, have_box):
     if fg_bg_net:
 
         if use_zval:
@@ -258,7 +258,13 @@ def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sampl
                      fg_mid, bg_mid,
                      rays['fg_far_depth'])
         else:
-            ret = net_oracle(rays['ray_o'], rays['ray_d'],
+
+            if have_box:
+                ret = net_oracle(rays['ray_o'], rays['ray_d'],
+                                 rays['fg_pts_flat'], rays['bg_pts_flat'],
+                                 rays['fg_far_depth'], rays['box_loc'][:,:2])
+            else:
+                ret = net_oracle(rays['ray_o'], rays['ray_d'],
                          rays['fg_pts_flat'], rays['bg_pts_flat'],
                          rays['fg_far_depth'])
 
@@ -351,7 +357,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
     use_label = False
 
 
-    ret_or = eval_oracle(rays, net_oracle, fg_bg_net, use_zval, front_sample, back_sample, train_box_only)
+    ret_or = eval_oracle(rays, net_oracle, fg_bg_net, use_zval, front_sample, back_sample, have_box)
 
     if use_label:
         ret_or['likeli_fg'] = rays['cls_label'][:,:front_sample]
@@ -663,7 +669,7 @@ def create_nerf(rank, args):
         models['optim_oracle'] = optim
         net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
     elif args.have_box:
-        ora_net = DepthOracle(args).to(rank)
+        ora_net = DepthOracleWithBox(args).to(rank)
         models['net_oracle'] = WrapperModule(ora_net)
         optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
         models['optim_oracle'] = optim
@@ -746,7 +752,7 @@ def create_nerf(rank, args):
         #
         map_location = 'cuda:%d' % rank
         #
-        fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/box_only_train_norm3_K=9Z=5/model_090000.pth"
+        fpath_dep ="/home/sally/nerf_clone/nerfpp_depth/logs/box_only_train_norm3_K=9Z=9_bg127/model_340000.pth"
         #
         to_load_dep = torch.load(fpath_dep, map_location=map_location)
 
@@ -782,6 +788,7 @@ def create_nerf(rank, args):
     elif args.have_box:
 
         map_location = 'cuda:%d' % rank
+        start = 0
         # fpath_box = '/home/sally/nerf/nerfplusplus/logs/box_300_2-1_fullview_sc0.5_mx100-140/model_485000.pth'
         # fpath_sc = '/home/sally/nerf/nerfplusplus/logs/newinter_10x10x18_npp/model_770000.pth'
 
@@ -793,35 +800,38 @@ def create_nerf(rank, args):
         ############### big inters #############
         # fpath_box = '/media/diskstation/sally/pretrained/box_models/box_model_485000.pth'
         # fpath_sc = '/media/diskstation/sally/pretrained/big_inters_norm15_sceneonly/model_425000.pth'
-        fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
 
-        # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_245000.pth"
-        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth"
-        ############### big inters #############
-
-
-        # to_load_box = torch.load(fpath_box, map_location=map_location)
-        to_load_comb = torch.load(fpath_comb, map_location=map_location)
-        to_load_dep = torch.load(fpath_depth_ora, map_location=map_location)
-
-
-
-        models['optim_oracle'].load_state_dict(to_load_dep['optim_oracle'])
-        models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
-
-
-
-        ## if the model being loaded has 2 cas level
-        # for k in to_load_sc['net_1'].keys():
-        #       to_load_sc['net_0'][k] = to_load_sc['net_1'][k]
+        ## ---------------new--------------- ##
+        # fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
+        # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth"
         #
-        for k in to_load_comb['net_1'].keys():
-            to_load_comb['net_0'][k] = to_load_comb['net_1'][k]
-
-        for k in to_load_dep['net_0'].keys():
-            to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
-
-        models['net_0'].load_state_dict(to_load_comb['net_0'])
+        #
+        # # models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
+        # ############### big inters #############
+        #
+        #
+        # # to_load_box = torch.load(fpath_box, map_location=map_location)
+        # to_load_comb = torch.load(fpath_comb, map_location=map_location)
+        # to_load_dep = torch.load(fpath_depth_ora, map_location=map_location)
+        #
+        #
+        # models['optim_oracle'].load_state_dict(to_load_dep['optim_oracle'])
+        # models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
+        #
+        #
+        #
+        # ## if the model being loaded has 2 cas level
+        # # for k in to_load_sc['net_1'].keys():
+        # #       to_load_sc['net_0'][k] = to_load_sc['net_1'][k]
+        # #
+        # for k in to_load_comb['net_1'].keys():
+        #     to_load_comb['net_0'][k] = to_load_comb['net_1'][k]
+        #
+        # for k in to_load_dep['net_0'].keys():
+        #     to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
+        #
+        # models['net_0'].load_state_dict(to_load_comb['net_0'])
+        ## ---------------new--------------- ##
 
 
 
@@ -921,9 +931,14 @@ def ddp_train_nerf(rank, args):
 
         if args.donerf_pretrain:
 
-            ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-                             ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
-                             ray_batch['fg_far_depth'].float())
+            if args.have_box:
+                ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                                 ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
+                                 ray_batch['fg_far_depth'].float(), box_loc=ray_batch['box_loc'][:,:2])
+            else:
+                ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                                 ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
+                                 ray_batch['fg_far_depth'].float())
 
 
             if time_program:
@@ -1038,8 +1053,25 @@ def ddp_train_nerf(rank, args):
             if args.have_box:
                 with torch.no_grad():
 
+                    def get_box_weights():
+                        net_oracle_box = models['net_oracle_boxonly']
+                        optim_oracle_box = models['optim_oracle_boxonly']
+
+                        fg_pts = ray_batch['ray_o'] + ray_batch['fg_z_vals_centre'].unsqueeze(-1) * ray_batch['ray_d']
+                        box_offset = (fg_pts - ray_batch['box_loc'].unsqueeze(-2))   # this is in object coordinate already -- how to convert to donerf
+
+                        #rayo rayd is the same, just the points are not quite translatable
+                        #
+
+
+
+                        ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                                         ray_batch['fg_pts_flat'].float())
+
+
                     ## how to combine boxes?
                     # option 1: 128 centre points
+
                     ret_box = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], ray_batch['fg_z_vals_centre'],
                             bg_z_vals=None, box_loc=ray_batch['box_loc'],
                             query_box_only=True, img_name=ray_batch['img_name'])

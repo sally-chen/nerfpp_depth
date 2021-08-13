@@ -119,7 +119,7 @@ class RaySamplerSingleImage(object):
 
         if img_path is not None:
             number = self.img_path[-9:-4]
-            self.label_path = self.img_path[:-13] + '/cube_filt9_z5/' + number
+            self.label_path = self.img_path[:-13] + '/cube_scene_filt9_z5/' + number
         else:
             self.label_path = None
         #
@@ -130,7 +130,7 @@ class RaySamplerSingleImage(object):
         if make_class_label:
 
             # os.makedirs('/home/sally/data/' +fol+ '/class_label_sameseg_rayd128_filt7_seg/', exist_ok=True)
-            os.makedirs(self.img_path[:-13] + '/cube_filt9_z5/', exist_ok=True)
+            os.makedirs(self.img_path[:-13] + '/cube_scene_filt9_z5/', exist_ok=True)
             if self.train_box_only:
                 self.get_classifier_label_torch_boxonly(N_front_sample=128, pretrain=True, save=True,
                                                         train_box_only=self.train_box_only)
@@ -210,6 +210,7 @@ class RaySamplerSingleImage(object):
 
                     # self.box_inds = np.nonzero(np.tile(self.depth_map[None, ...], (128, 1, 1)) == 255.)  # None
                     # self.box_inds = np.nonzero(self.depth_map.reshape(-1) != 255.)  # None
+                    self.box_inds = np.nonzero(self.depth_map.reshape(-1) == 255.)  # None
                     self.depth_map =np.array(near + self.depth_map / 255. * (far - near))
 
 
@@ -242,8 +243,8 @@ class RaySamplerSingleImage(object):
 
                     # to create depth segments for donerf need to normalze depthmap, so that when we so search sort everything is in normalied coordinates
 
-                    self.depth_map_nonorm = depth_map
-                    self.depth_map = None #self.depth_normalize(depth_map)
+                    self.depth_map_nonorm = None #depth_map
+                    self.depth_map = self.depth_normalize(depth_map)
             else:
                 self.depth_map_nonorm = None
                 self.depth_map = None
@@ -409,6 +410,15 @@ class RaySamplerSingleImage(object):
 
             seg_ind = torch.searchsorted(depth_segs, depth_map.unsqueeze(-1))
 
+
+            if self.box_inds is not None:
+                seg_ind[self.box_inds] = 127
+
+                del self.box_inds
+
+
+
+
             if time_program:
                 cur_time_sp = time.time() - cur_time
                 print('[TIME] searchsort {}'.format(cur_time_sp))
@@ -422,19 +432,19 @@ class RaySamplerSingleImage(object):
             x = x.reshape(-1, 1)
             y = y.reshape(-1, 1)
 
-            if self.box_inds is not None:
-                x = torch.take(x, torch.Tensor(self.box_inds[0]).long().to(rank)).reshape(-1, 1)
-                y = torch.take(y, torch.Tensor(self.box_inds[0]).long().to(rank)).reshape(-1, 1)
-                seg_ind = torch.take(seg_ind, torch.Tensor(self.box_inds[0]).long().to(rank)).reshape(-1, 1)
-                # maxs[self.box_inds[1], self.box_inds[2], self.box_inds[0]] = 0.
-
-                del self.box_inds
+            # if self.box_inds is not None:
+            #     x = torch.take(x, torch.Tensor(self.box_inds[0]).long().to(rank)).reshape(-1, 1)
+            #     y = torch.take(y, torch.Tensor(self.box_inds[0]).long().to(rank)).reshape(-1, 1)
+            #     seg_ind = torch.take(seg_ind, torch.Tensor(self.box_inds[0]).long().to(rank)).reshape(-1, 1)
+            #     # maxs[self.box_inds[1], self.box_inds[2], self.box_inds[0]] = 0.
+            #
+            #     del self.box_inds
 
 
             # ones = torch.cat([x.unsqueeze(-1),y.unsqueeze(-1),seg_ind.unsqueeze(-1)],dim=-1)
 
             ## you can technically loop through ones and compute that function
-            K_spat = 9
+            K_spat = 5
             K_half_fl = int(np.floor(K_spat / 2))
 
             target_values = np.zeros((K_spat, K_spat))
@@ -731,19 +741,19 @@ class RaySamplerSingleImage(object):
             # tri_filter = torch.Tensor([[0.33333, 0.666666, 1, 0.666666, 0.33333]]).unsqueeze(0).to(rank)
             cls_label_flat = maxs.view(self.H * self.W, depth_segs.shape[1])  # [H* W, numseg]
 
-            Z = 25  # triangle filter
+
+
+            Z = 5  # triangle filter
             tri_filter = []
 
             Z_half_floor = np.floor(Z / 2)
             for i in range(int(-Z_half_floor), int(Z_half_floor) + 1):
                 tri_filter.append((Z_half_floor + 1 - np.absolute(i)) / (Z_half_floor + 1))
-            tri_filter = torch.Tensor(tri_filter).unsqueeze(0).to(rank)
-
-
+            tri_filter = torch.Tensor(tri_filter).unsqueeze(0).unsqueeze(0).to(rank)  ## need to be [1, 1, Z]
             # test15 = cls_label_flat.detach().cpu().numpy()
 
             cls_label_flat_filtered = torch.squeeze(
-                torch.nn.functional.conv1d(cls_label_flat.unsqueeze(-2), tri_filter, padding=Z_half_floor))
+                torch.nn.functional.conv1d(cls_label_flat.unsqueeze(-2), tri_filter, padding=int(Z_half_floor)))
 
             cls_label_flat_filtered[cls_label_flat_filtered > 1.] = 1.
             cls_label_flat_filtered[cls_label_flat_filtered < 0.] = 0.
