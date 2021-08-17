@@ -14,7 +14,7 @@ from utils import mse2psnr, colorize_np, to8b
 import imageio
 from ddp_train_nerf import config_parser, setup_logger, render_single_image, create_nerf
 import logging
-from helpers import plot_mult_pose
+from helpers import plot_mult_pose, write_depth_vis
 
 from PIL import Image
 from PIL import ImageDraw
@@ -75,6 +75,18 @@ def ddp_test_nerf(rank, args):
     logger = logging.getLogger(__package__)
     setup_logger()
 
+
+    os.makedirs(os.path.join(args.basedir, args.expname), exist_ok=True)
+    f = os.path.join(args.basedir, args.expname, 'args.txt')
+    with open(f, 'w') as file:
+        for arg in (vars(args)):
+            attr = getattr(args, arg)
+            file.write('{} = {}\n'.format(arg, attr))
+    if args.config is not None:
+        f = os.path.join(args.basedir, args.expname, 'config.txt')
+        with open(f, 'w') as file:
+            file.write(open(args.config, 'r').read())
+
     ###### create network and wrap in ddp; each process should do this
     start, models = create_nerf(rank, args)
 
@@ -92,6 +104,10 @@ def ddp_test_nerf(rank, args):
 
 
         for idx in range(len(ray_samplers_video)):
+
+            if idx < 8:
+                continue
+
             print('rendering : {}'.format(idx))
             ### each process should do this; but only main process merges the results
             fname = '{:06d}.png'.format(idx)
@@ -123,6 +139,17 @@ def ddp_test_nerf(rank, args):
             # only save last level
             im = rgb.numpy()
             # compute psnr if ground-truth is available
+
+            select_inds = np.arange(640 * 280, 640 * 281)
+            select_inds2 = np.arange(640 * 180, 640 * 181)
+
+            write_depth_vis(None,  np.concatenate([torch.sigmoid(pred_fg[select_inds]),
+                                                  torch.sigmoid(pred_fg[select_inds2])],
+                                                 axis=1), out_dir, 'depthpredfg_'+fname)
+            write_depth_vis(None,  np.concatenate([torch.sigmoid(pred_bg[select_inds]),
+                                                  torch.sigmoid(pred_bg[select_inds2])],
+                                                 axis=1), out_dir, 'depthpredbg_'+fname)
+
             if ray_samplers_video[idx].img_path is not None:
                 gt_im = ray_samplers_video[idx].get_img()
                 psnr = mse2psnr(np.mean((gt_im - im) * (gt_im - im)))
@@ -146,6 +173,7 @@ def ddp_test_nerf(rank, args):
                 # im = to8b(im)
                 # imageio.imwrite(os.path.join(out_dir, 'bg_' + fname), im)
                 #
+
             im = d.numpy()
             im[im > 100.] = 100.
             im = colorize_np(im, cmap_name='jet', append_cbar=True)
