@@ -262,7 +262,10 @@ def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sampl
             if have_box:
                 ret = net_oracle(rays['ray_o'], rays['ray_d'],
                                  rays['fg_pts_flat'], rays['bg_pts_flat'],
-                                 rays['fg_far_depth'], rays['box_loc'][:,:2])
+                                 rays['fg_far_depth'], rays['box_loc'][:,:2].float())
+                # ret = net_oracle(rays['ray_o'], rays['ray_d'],
+                #                  rays['fg_pts_flat'], rays['bg_pts_flat'],
+                #                  rays['fg_far_depth'])
             else:
                 ret = net_oracle(rays['ray_o'], rays['ray_d'],
                          rays['fg_pts_flat'], rays['bg_pts_flat'],
@@ -372,13 +375,21 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
         box_weights = None
 
-        if box_loc is not None:
+        # if box_loc is not None:
+        #     from helpers import get_box_weight
+        #     box_weights = get_box_weight(box_loc=box_loc,
+        #                                  box_size=1. / 30.,
+        #                                  fg_z_vals=fg_z_vals_centre,
+        #                                  ray_d=ray_d, ray_o=ray_o).double()
 
-            box_ret = net(ray_o, ray_d, fg_far_depth, fg_z_vals_centre,
-                          bg_z_vals=None, box_loc=box_loc,
-                          query_box_only=True)
-
-            box_weights = box_ret['fg_box_sig']
+            ## resample from box_nerf
+            # fg_weights = fg_weights + normalize_torch(box_weights)
+            #
+            # box_ret = net(ray_o, ray_d, fg_far_depth, fg_z_vals_centre,
+            #               bg_z_vals=None, box_loc=box_loc,
+            #               query_box_only=True)
+            #
+            # box_weights = box_ret['fg_box_sig']
             # box_test = box_weights.cpu().numpy()
 
         fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
@@ -650,15 +661,9 @@ def create_nerf(rank, args):
     # fix random seed just to make sure the network is initialized with same weights at different processes
     torch.manual_seed(777)
 
-
-
-
     models = OrderedDict()
     models['cascade_level'] = 1
     models['cascade_samples'] = [int(x.strip()) for x in args.cascade_samples.split(',')]
-
-
-
 
     img_names = None
 
@@ -670,6 +675,7 @@ def create_nerf(rank, args):
         net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
     elif args.have_box:
         ora_net = DepthOracleWithBox(args).to(rank)
+        # ora_net = DepthOracle(args).to(rank)
         models['net_oracle'] = WrapperModule(ora_net)
         optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
         models['optim_oracle'] = optim
@@ -802,35 +808,40 @@ def create_nerf(rank, args):
         # fpath_sc = '/media/diskstation/sally/pretrained/big_inters_norm15_sceneonly/model_425000.pth'
 
         ## ---------------new--------------- ##
-        # fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
+        fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth"
-        #
-        #
-        # # models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
-        # ############### big inters #############
-        #
-        #
-        # # to_load_box = torch.load(fpath_box, map_location=map_location)
-        # to_load_comb = torch.load(fpath_comb, map_location=map_location)
-        # to_load_dep = torch.load(fpath_depth_ora, map_location=map_location)
-        #
-        #
-        # models['optim_oracle'].load_state_dict(to_load_dep['optim_oracle'])
+        # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle_boxsample0.6/model_885000.pth"
+        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle/model_995000.pth"
+
+
         # models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
+        ############### big inters #############
+
+
+        # to_load_box = torch.load(fpath_box, map_location=map_location)
+        to_load_comb = torch.load(fpath_comb, map_location=map_location)
+        to_load_dep = torch.load(fpath_depth_ora, map_location=map_location)
+
+
+        models['optim_oracle'].load_state_dict(to_load_dep['optim_oracle'])
+        models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
+
+
+
+        ## if the model being loaded has 2 cas level
+        # for k in to_load_sc['net_1'].keys():
+        #       to_load_sc['net_0'][k] = to_load_sc['net_1'][k]
         #
-        #
-        #
-        # ## if the model being loaded has 2 cas level
-        # # for k in to_load_sc['net_1'].keys():
-        # #       to_load_sc['net_0'][k] = to_load_sc['net_1'][k]
-        # #
-        # for k in to_load_comb['net_1'].keys():
-        #     to_load_comb['net_0'][k] = to_load_comb['net_1'][k]
-        #
+
+        # load scene & box from comb
+        for k in to_load_comb['net_1'].keys():
+            to_load_comb['net_0'][k] = to_load_comb['net_1'][k]
+
+        # load scene from donerf
         # for k in to_load_dep['net_0'].keys():
         #     to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
-        #
-        # models['net_0'].load_state_dict(to_load_comb['net_0'])
+
+        models['net_0'].load_state_dict(to_load_comb['net_0'])
         ## ---------------new--------------- ##
 
 
@@ -1053,40 +1064,32 @@ def ddp_train_nerf(rank, args):
             if args.have_box:
                 with torch.no_grad():
 
-                    def get_box_weights():
-                        net_oracle_box = models['net_oracle_boxonly']
-                        optim_oracle_box = models['optim_oracle_boxonly']
 
-                        fg_pts = ray_batch['ray_o'] + ray_batch['fg_z_vals_centre'].unsqueeze(-1) * ray_batch['ray_d']
-                        box_offset = (fg_pts - ray_batch['box_loc'].unsqueeze(-2))   # this is in object coordinate already -- how to convert to donerf
+                    # option1
 
-                        #rayo rayd is the same, just the points are not quite translatable
-                        #
+                    # ret_box = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], ray_batch['fg_z_vals_centre'],
+                    #         bg_z_vals=None, box_loc=ray_batch['box_loc'],
+                    #         query_box_only=True, img_name=ray_batch['img_name'])
+                    # box_weights = ret_box['fg_box_sig']
+                    # fg_weights = fg_weights + normalize_torch(box_weights)
+                    #
+                    # option2
+                    # lets test this --- we are gettin occupancy only, maybe we could get transmittance
+                    from helpers import get_box_weight
+                    box_weights = get_box_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
+                                                 fg_z_vals=ray_batch['fg_z_vals_centre'],
+                                                 ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'] )
+                    box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
 
-
-
-                        ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-                                         ray_batch['fg_pts_flat'].float())
-
-
-                    ## how to combine boxes?
-                    # option 1: 128 centre points
-
-                    ret_box = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], ray_batch['fg_z_vals_centre'],
-                            bg_z_vals=None, box_loc=ray_batch['box_loc'],
-                            query_box_only=True, img_name=ray_batch['img_name'])
-                    box_weights = ret_box['fg_box_sig']
                     fg_weights = fg_weights + normalize_torch(box_weights)
 
-                    # # opt 2:
-                    #
-                    # ret_box = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'],
-                    #               ray_batch['fg_z_vals_centre'][:, ::2],
-                    #               bg_z_vals=None, box_loc=ray_batch['box_loc'],
-                    #               query_box_only=True, img_name=ray_batch['img_name'])
-                    # box_weights = torch.cat([ret_box['fg_box_sig'], ret_box['fg_box_sig']], dim=2)
-                    # box_weights = box_weights.view(box_weights.shape[0], box_weights.shape[1]*2)
-                    # fg_weights = fg_weights + normalize_torch(box_weights)
+
+
+
+
+                    # opt 3:
+                    # diretly get from scene_box donerf
+
 
                     #opt 3 get weights from donerf
 

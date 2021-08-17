@@ -1,3 +1,6 @@
+import os.path
+
+import imageio
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
@@ -5,6 +8,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score, confusion_m
 import PIL.Image
 from torchvision.transforms import ToTensor
 import io
+import torch
 
 
 def plot_mult_pose(poses_list, name, labels):
@@ -104,6 +108,44 @@ def log_plot_conf_mat(writer, cm, step, name):
 
     writer.add_image(name, image, step)
 
+def write_depth_vis(label, pred, out_dir, frname):
+    fig = plt.figure(figsize=(15, 8))
+
+    # pos = [str(i) for i in range(pred.shape[1])]
+
+    if label is not None:
+        ax_label = fig.add_subplot(121)
+        pcm_label = ax_label.matshow(label)
+        ax_label.set_title("Depth Label")
+        # ax_label.set_xticklabels([''] + pos)
+
+        ax_pred = fig.add_subplot(122)
+
+    else:
+        ax_pred = fig.add_subplot(111)
+    pcm_pred = ax_pred.matshow(pred)
+    ax_pred.set_title("Depth Pred")
+    # ax_pred.set_xticklabels([''] + pos)
+
+    # plt.title('Prob Distribution of Depth Label vs Prediction')
+    # cax=plt.imshow()
+
+    if label is not None:
+        plt.colorbar(pcm_label, ax=ax_label)
+
+    plt.colorbar(pcm_pred, ax=ax_pred)
+    buf = io.BytesIO()
+    plt.savefig(buf, format='jpeg')
+
+    plt.clf()
+    plt.close(fig)
+    buf.seek(0)
+
+    image = PIL.Image.open(buf)
+    imageio.imwrite(os.path.join(out_dir, frname), image)
+
+
+
 
 def visualize_depth_label(writer, label, pred, step, name):
     fig = plt.figure(figsize=(15,8))
@@ -197,4 +239,36 @@ def loss_deviation(writer, label, pred, step, name):
     image = ToTensor()(image)
 
     writer.add_image(name, image, step)
+
+
+def get_box_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o):
+    # pts: N x 128 x 3
+    # assume axis aligned box
+
+
+    dots_sh = list(ray_d.shape[:-1])
+
+    N_samples = fg_z_vals.shape[-1]
+    fg_ray_o = ray_o.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
+    fg_ray_d = ray_d.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
+    fg_pts = fg_ray_o + fg_z_vals.unsqueeze(-1) * fg_ray_d
+
+
+    box_loc[:,2] = -1.#-1.8/60.
+
+    box_size = torch.Tensor([[1/15.,1/15.,4.]]).to(torch.cuda.current_device())
+
+    mins = box_loc - box_size / 2  # N, 3
+    maxs = box_loc + box_size / 2  # N, 3
+
+
+    mins = mins.unsqueeze(1).expand(dots_sh + [N_samples, 3])
+    maxs = maxs.unsqueeze(1).expand(dots_sh + [N_samples, 3])
+
+
+    box_occupancy = torch.zeros(fg_z_vals.shape).to(torch.cuda.current_device()) # N, 127
+    box_occupancy = torch.where(torch.sum(torch.gt(fg_pts.double(), mins) & torch.lt(fg_pts.double(), maxs), dim=-1)==3, 1., box_occupancy.double())
+
+    return box_occupancy.double()
+
 
