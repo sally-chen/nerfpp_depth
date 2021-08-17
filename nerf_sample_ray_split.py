@@ -243,8 +243,8 @@ class RaySamplerSingleImage(object):
 
                     # to create depth segments for donerf need to normalze depthmap, so that when we so search sort everything is in normalied coordinates
 
-                    self.depth_map_nonorm = None #depth_map
-                    self.depth_map = self.depth_normalize(depth_map)
+                    self.depth_map_nonorm = depth_map
+                    self.depth_map = None#self.depth_normalize(depth_map)
             else:
                 self.depth_map_nonorm = None
                 self.depth_map = None
