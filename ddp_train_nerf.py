@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES']= '0'
+os.environ['CUDA_VISIBLE_DEVICES']= '2'
 
 import torch
 import torch.nn as nn
@@ -810,7 +810,7 @@ def create_nerf(rank, args):
         ## ---------------new--------------- ##
         fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth"
-        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle_boxsample0.6/model_900000.pth"
+        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle_boxsample0.6/model_995000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle/model_995000.pth"
 
 
@@ -838,8 +838,8 @@ def create_nerf(rank, args):
             to_load_comb['net_0'][k] = to_load_comb['net_1'][k]
 
         # load scene from donerf
-        for k in to_load_dep['net_0'].keys():
-            to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
+        # for k in to_load_dep['net_0'].keys():
+        #     to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
 
         models['net_0'].load_state_dict(to_load_comb['net_0'])
         ## ---------------new--------------- ##
@@ -1169,8 +1169,8 @@ def ddp_train_nerf(rank, args):
 
             # select_inds = np.random.choice(640*360, size=(200,), replace=False)
 
-            select_inds = np.arange(640*280,640*281)
-            select_inds2 = np.arange(640*180,640*181)
+            select_inds = np.arange(640*250,640*251)
+            select_inds2 = np.arange(640*200,640*201)
 
             #### critical: make sure each process is working on the same random image
             time0 = time.time()
