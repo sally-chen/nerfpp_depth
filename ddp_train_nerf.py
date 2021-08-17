@@ -810,8 +810,8 @@ def create_nerf(rank, args):
         ## ---------------new--------------- ##
         fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth"
-        # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle_boxsample0.6/model_885000.pth"
-        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle/model_995000.pth"
+        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle_boxsample0.6/model_900000.pth"
+        # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle/model_995000.pth"
 
 
         # models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
@@ -838,8 +838,8 @@ def create_nerf(rank, args):
             to_load_comb['net_0'][k] = to_load_comb['net_1'][k]
 
         # load scene from donerf
-        # for k in to_load_dep['net_0'].keys():
-        #     to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
+        for k in to_load_dep['net_0'].keys():
+            to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
 
         models['net_0'].load_state_dict(to_load_comb['net_0'])
         ## ---------------new--------------- ##
@@ -1017,26 +1017,17 @@ def ddp_train_nerf(rank, args):
 
             with torch.no_grad():
 
-                if args.fg_bg_net:
+                if not args.use_zval:
 
-                    if not args.use_zval:
-
-                        ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-                                         ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
-                                         ray_batch['fg_far_depth'].float())
-                    else:
-
-                        ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-                                         fg_mid.float(), bg_mid.float(),
-                                         ray_batch['fg_far_depth'].float())
-
+                    ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                                     ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
+                                     ray_batch['fg_far_depth'].float())
                 else:
 
-                    if args.use_zval:
-                        pts = torch.cat([ray_batch['fg_z_vals_centre'], ray_batch['bg_z_vals_centre']], dim=-1)
-                    else:
-                        pts = torch.cat([ray_batch['fg_pts_flat'], ray_batch['bg_pts_flat']], dim=-1)
-                    ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(), pts.float())
+                    ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                                     fg_mid.float(), bg_mid.float(),
+                                     ray_batch['fg_far_depth'].float())
+
 
             # # results on different cascade levels
 
@@ -1061,9 +1052,9 @@ def ddp_train_nerf(rank, args):
 
             fg_weights[ray_batch['fg_z_vals_centre']<0.0002] = 0.
 
-            if args.have_box:
-                with torch.no_grad():
-
+            # if args.have_box:
+            #     with torch.no_grad():
+            #
 
                     # option1
 
@@ -1075,13 +1066,13 @@ def ddp_train_nerf(rank, args):
                     #
                     # option2
                     # lets test this --- we are gettin occupancy only, maybe we could get transmittance
-                    from helpers import get_box_weight
-                    box_weights = get_box_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
-                                                 fg_z_vals=ray_batch['fg_z_vals_centre'],
-                                                 ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'] )
-                    box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
-
-                    fg_weights = fg_weights + normalize_torch(box_weights)
+                    # from helpers import get_box_weight
+                    # box_weights = get_box_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
+                    #                              fg_z_vals=ray_batch['fg_z_vals_centre'],
+                    #                              ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'] )
+                    # box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
+                    #
+                    # fg_weights = fg_weights + normalize_torch(box_weights)
 
 
 
@@ -1133,7 +1124,7 @@ def ddp_train_nerf(rank, args):
 
                 depth_loss = dep_l1l2loss(torch.div(1.,d_pred_map), torch.div(1.,d_gt_map), l1l2 = 'l1')
                 #reg_loss = dep_l1l2loss(torch.div(1.,d_pred_map[:512])-torch.div(1.,d_pred_map[512:]), torch.div(1.,d_gt_map[:512])-torch.div(1.,d_gt_map[512:]), l1l2 = 'l1')
-                loss = rgb_loss  +  depth_loss
+                loss = rgb_loss  +  0.1 * depth_loss
                 #scalars_to_log['level_{}/reg_loss'.format(m)] = reg_loss.item()
 
                 #loss = rgb_loss * 0 +  depth_loss
