@@ -1018,8 +1018,13 @@ def ddp_train_nerf(rank, args):
             with torch.no_grad():
 
                 if not args.use_zval:
+                    if args.have_box:
+                        ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                                         ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
+                                         ray_batch['fg_far_depth'].float(), box_loc=ray_batch['box_loc'][:, :2])
 
-                    ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                    else:
+                        ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
                                      ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
                                      ray_batch['fg_far_depth'].float())
                 else:
@@ -1093,7 +1098,7 @@ def ddp_train_nerf(rank, args):
 
             bg_depth_mid = bg_mid
             if loss_type is 'bce':
-                bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach() +0.05
+                bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach()
                 # bg_weights = ray_batch['cls_label'][:,args.front_sample:][:, 1: args.back_sample-1].clone().detach()
             else:
                 bg_weights = F.softmax(ret['likeli_bg'],dim=-1)[:, 1: args.back_sample-1].clone().detach()
