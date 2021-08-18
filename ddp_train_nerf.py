@@ -1,4 +1,4 @@
-import os
+                import os
 os.environ['CUDA_VISIBLE_DEVICES']= '2'
 
 import torch
@@ -636,7 +636,7 @@ def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask
         rgb_im = img_HWC2CHW(others['rgb_fg'])
         rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
         writer.add_image(prefix + 'level_{}/fg_rgb'.format(0), rgb_im, global_step)
-        
+
         depth = others['d_fg']
         depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True,
                                          mask=mask))
@@ -729,7 +729,7 @@ def create_nerf(rank, args):
         #
 
 
-        ###########################33 before donerf use random weights for nerf ##########    
+        ###########################33 before donerf use random weights for nerf ##########
         for m in range(models['cascade_level']):
             for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
                  models[name].load_state_dict(to_load[name])
@@ -901,7 +901,7 @@ def ddp_train_nerf(rank, args):
     torch.manual_seed((rank + 1) * 777)
 
     writer = SummaryWriter(os.path.join(args.basedir, 'summaries', args.expname))
-        
+
     # start training
     what_val_to_log = 0             # helper variable for parallel rendering of a image
     what_train_to_log = 0
