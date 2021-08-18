@@ -1,7 +1,4 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES']= '0'
-os.environ['CUDA_LAUNCH_BLOCKING']= "1"
-
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -386,7 +383,7 @@ def ddp_train_nerf(rank, args):
     torch.manual_seed((rank + 1) * 777)
 
     writer = SummaryWriter(os.path.join(args.basedir, 'summaries', args.expname))
-        
+
     # start training
     what_val_to_log = 0             # helper variable for parallel rendering of a image
     what_train_to_log = 0
