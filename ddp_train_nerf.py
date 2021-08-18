@@ -375,12 +375,12 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
         box_weights = None
 
-        # if box_loc is not None:
-        #     from helpers import get_box_weight
-        #     box_weights = get_box_weight(box_loc=box_loc,
-        #                                  box_size=1. / 30.,
-        #                                  fg_z_vals=fg_z_vals_centre,
-        #                                  ray_d=ray_d, ray_o=ray_o).double()
+        if box_loc is not None:
+            from helpers import get_box_weight
+            box_weights = get_box_weight(box_loc=box_loc,
+                                         box_size=1. / 30.,
+                                         fg_z_vals=fg_z_vals_centre,
+                                         ray_d=ray_d, ray_o=ray_o).double()
 
             ## resample from box_nerf
             # fg_weights = fg_weights + normalize_torch(box_weights)
@@ -1057,9 +1057,9 @@ def ddp_train_nerf(rank, args):
 
             fg_weights[ray_batch['fg_z_vals_centre']<0.0002] = 0.
 
-            # if args.have_box:
-            #     with torch.no_grad():
-            #
+            if args.have_box:
+                with torch.no_grad():
+
 
                     # option1
 
@@ -1071,13 +1071,13 @@ def ddp_train_nerf(rank, args):
                     #
                     # option2
                     # lets test this --- we are gettin occupancy only, maybe we could get transmittance
-                    # from helpers import get_box_weight
-                    # box_weights = get_box_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
-                    #                              fg_z_vals=ray_batch['fg_z_vals_centre'],
-                    #                              ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'] )
-                    # box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
-                    #
-                    # fg_weights = fg_weights + normalize_torch(box_weights)
+                    from helpers import get_box_weight
+                    box_weights = get_box_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
+                                                 fg_z_vals=ray_batch['fg_z_vals_centre'],
+                                                 ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'] )
+                    box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
+
+                    fg_weights = fg_weights + normalize_torch(box_weights)
 
 
 
