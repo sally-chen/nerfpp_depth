@@ -810,7 +810,7 @@ def create_nerf(rank, args):
         ## ---------------new--------------- ##
         fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth"
-        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle_boxsample0.6/model_995000.pth"
+        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/scene_nobox_set2_fr192_K9Z5/model_570000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle/model_995000.pth"
 
 
