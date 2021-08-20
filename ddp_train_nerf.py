@@ -293,6 +293,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         # fg_weights = normalize_torch(fg_weights)
         fg_weights = torch.sigmoid(fg_weights)
 
+    fg_weights = fg_weights.clone()
     fg_weights[fg_z_vals_centre < 0.0002] = float(0.0)
 
     if box_weights is not None:
@@ -308,6 +309,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
                           N_samples=samples, det=False))  # [..., N_samples]
 
 
+    fg_depth = fg_depth.clone()
     fg_depth[fg_depth<0.0002] = float(0.0002)
 
     # fg_depth_np = fg_depth.cpu().numpy()
