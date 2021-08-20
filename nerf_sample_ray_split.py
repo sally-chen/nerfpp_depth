@@ -231,8 +231,6 @@ class RaySamplerSingleImage(object):
                 seg_map = np.array(imageio.imread(self.seg_path)[..., 0]).reshape(-1)
                 self.pole_inds = (seg_map == 5).nonzero()[0]
 
-                print(self.pole_inds.shape[0])
-
                 if self.pole_inds.shape[0] == 0:
                     self.pole_inds = None
 
@@ -672,8 +670,6 @@ class RaySamplerSingleImage(object):
 
         fg_pts_flat = fg_pts.view(N_rays, -1)
         bg_pts_flat = torch.flip(bg_pts, dims=[1, ]).view(N_rays, -1)
-
-        print(pretrain)
 
         if pretrain and save:
 
