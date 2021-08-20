@@ -258,12 +258,12 @@ def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sampl
         else:
 
             if have_box:
+              # ret = net_oracle(rays['ray_o'], rays['ray_d'],
+              #                  rays['fg_pts_flat'], rays['bg_pts_flat'],
+              #                  rays['fg_far_depth'], rays['box_loc'][:,:2].float())
                 ret = net_oracle(rays['ray_o'], rays['ray_d'],
-                                 rays['fg_pts_flat'], rays['bg_pts_flat'],
-                                 rays['fg_far_depth'], rays['box_loc'][:,:2].float())
-                # ret = net_oracle(rays['ray_o'], rays['ray_d'],
-                #                  rays['fg_pts_flat'], rays['bg_pts_flat'],
-                #                  rays['fg_far_depth'])
+                               rays['fg_pts_flat'], rays['bg_pts_flat'],
+                               rays['fg_far_depth'])
             else:
                 ret = net_oracle(rays['ray_o'], rays['ray_d'],
                          rays['fg_pts_flat'], rays['bg_pts_flat'],
@@ -286,8 +286,6 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
     # fg_weights_np = fg_weights.cpu().numpy()
     # bg_weights_np = bg_weights.cpu().numpy()
 
-
-
     if loss_type is 'ce':
         fg_weights = F.softmax(fg_weights, dim=-1)
         # fg_weights = normalize_torch(fg_weights)[:, 1:front_sample-1]
@@ -295,27 +293,22 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         # fg_weights = normalize_torch(fg_weights)
         fg_weights = torch.sigmoid(fg_weights)
 
-    fg_weights[fg_z_vals_centre < 0.0002] = 0.0
+    fg_weights[fg_z_vals_centre < 0.0002] = float(0.0)
+
     if box_weights is not None:
         # fg_weights = fg_weights + normalize_torch(box_weights[:, 1:])
 
         # box_norm_test = normalize_torch(box_weights).cpu().numpy()
         fg_weights = fg_weights + normalize_torch(box_weights)
 
-
-
     fg_depth_mid = 0.5 * (fg_z_vals_centre[:, 1:] + fg_z_vals_centre[:, :-1])
     bg_depth_mid = 0.5 * (bg_z_vals_centre[:, 1:] + bg_z_vals_centre[:, :-1])
-
-
-
-
 
     fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights[:, 1:front_sample-1],
                           N_samples=samples, det=False))  # [..., N_samples]
 
 
-    fg_depth[fg_depth<0.0002] = 0.0002
+    fg_depth[fg_depth<0.0002] = float(0.0002)
 
     # fg_depth_np = fg_depth.cpu().numpy()
 
@@ -378,7 +371,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             box_weights = get_box_weight(box_loc=box_loc,
                                          box_size=1. / 30.,
                                          fg_z_vals=fg_z_vals_centre,
-                                         ray_d=ray_d, ray_o=ray_o).double()
+                                         ray_d=ray_d, ray_o=ray_o)
 
             ## resample from box_nerf
             # fg_weights = fg_weights + normalize_torch(box_weights)
@@ -398,7 +391,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
         if not have_box:
             ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
-        else :
+        else:
             ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc)
 
         # fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
@@ -672,8 +665,8 @@ def create_nerf(rank, args):
         models['optim_oracle'] = optim
         net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
     elif args.have_box:
-        ora_net = DepthOracleWithBox(args).to(rank)
-        # ora_net = DepthOracle(args).to(rank)
+#       ora_net = DepthOracleWithBox(args).to(rank)
+        ora_net = DepthOracle(args).to(rank)
         models['net_oracle'] = WrapperModule(ora_net)
         optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
         models['optim_oracle'] = optim

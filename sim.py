@@ -30,7 +30,7 @@ class Sim:
 
 
     @torch.no_grad()
-    def run(self, x, c, max_depth=60):
+    def run(self, x, c, max_depth=60, rgb=False):
 
         ray_samplers = load_data_array([torch.eye(4)], [x], [c],
                 self.h, self.w, False, True)
@@ -51,6 +51,9 @@ class Sim:
 
         d = ret[1]
         d[d > max_depth] = max_depth # clip invalid points
+
+        if rgb:
+            return im, d
 
         return d
 
@@ -87,7 +90,7 @@ def test():
     i = 0
     print(locs[0].shape)
 
-    rgb, d = sim.run(poses[0], locs[0])
+    rgb, d = sim.run(poses[0], locs[0], rgb=True)
     brgb = to8b(rgb.detach().cpu().numpy())
     bd = colorize_np(d.detach().cpu().numpy(), cmap_name='jet', append_cbar=True)
     bd = to8b(bd)
