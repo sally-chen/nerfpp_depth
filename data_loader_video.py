@@ -31,8 +31,15 @@ def gen_box_locs(count=55):
     # loc = np.concatenate((np.random.uniform(87., 90., (count,1)),
     #                       np.random.uniform(132., 135., (count,1))), axis=1)
 
-    loc = np.concatenate((np.random.uniform(85., 88., (count,1)),
-                          np.random.uniform(110., 114., (count,1))), axis=1)
+    ct1 = 30
+    ct2 = 20
+    loc1 = np.concatenate((np.random.uniform(85., 88., (ct1,1)),
+                          np.random.uniform(110., 114., (ct1,1))), axis=1)
+
+    loc2 = np.concatenate((np.random.uniform(95., 97., (ct2,1)),
+                          np.random.uniform(111., 114., (ct2,1))), axis=1)
+
+    loc = np.concatenate([loc1,loc2], axis=0)
 
     max = np.array([100., 140., 2.8])
     min = np.array([85., 125., 2.8])
@@ -63,20 +70,20 @@ def gen_poses():
     turn1 = np.linspace((92,128),(92,128),5)
     turn1_dg = (np.arange(180.0, 270.0, 18) + np.random.uniform(low=-1.0, high=1.0, size=(5,))) * math.pi / 180.
 
-    xy2 = np.linspace((92,128),(92,105),10)
+    xy2 = np.linspace((92,128),(92,108),10)
     dg2 = (np.ones((10,)) * 270.) * math.pi / 180.
 
-    turn2 = np.linspace((92,105),(92,105),5)
+    turn2 = np.linspace((92,108),(92,108),5)
     turn2_dg = (np.arange(270.0, 180.0, -18) + np.random.uniform(low=-1.0, high=1.0, size=(5,))) * math.pi / 180.
 
-    xy3 = np.linspace((92,105),(89,105),10)
+    xy3 = np.linspace((92,108),(91,108),5)
     dg3 = (np.ones((10,)) * 180.) * math.pi / 180.
 
-    turn3 = np.linspace((89,105),(89,105),5)
+    turn3 = np.linspace((91,108),(91,108),5)
     turn3_dg = (np.arange(180.0, 90, -18) + np.random.uniform(low=-1.0, high=1.0, size=(5,))) * math.pi / 180.
 
 
-    xy4 = np.linspace((89,105),(89,135),10)
+    xy4 = np.linspace((91,108),(91,135),15)
     dg4 = (np.ones((10,)) * 90.) * math.pi / 180.
     # turn4 = np.linspace((87,135),(87,135),10)
     # turn4_dg = (np.arange(90.0, 0.0, -9) + np.random.uniform(low=-1.0, high=1.0, size=(10,))) * math.pi / 180.

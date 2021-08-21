@@ -105,8 +105,8 @@ def ddp_test_nerf(rank, args):
 
         for idx in range(len(ray_samplers_video)):
 
-            if idx < 8:
-                continue
+            # if idx < 8:
+            #     continue
 
             print('rendering : {}'.format(idx))
             ### each process should do this; but only main process merges the results
