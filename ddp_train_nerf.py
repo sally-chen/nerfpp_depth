@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES']= '2'
+os.environ['CUDA_VISIBLE_DEVICES']= '0'
 
 import torch
 import torch.nn as nn
@@ -260,12 +260,12 @@ def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sampl
         else:
 
             if have_box:
-                ret = net_oracle(rays['ray_o'], rays['ray_d'],
-                                 rays['fg_pts_flat'], rays['bg_pts_flat'],
-                                 rays['fg_far_depth'], rays['box_loc'][:,:2].float())
                 # ret = net_oracle(rays['ray_o'], rays['ray_d'],
                 #                  rays['fg_pts_flat'], rays['bg_pts_flat'],
-                #                  rays['fg_far_depth'])
+                #                  rays['fg_far_depth'], rays['box_loc'][:,:2].float())
+                ret = net_oracle(rays['ray_o'], rays['ray_d'],
+                                 rays['fg_pts_flat'], rays['bg_pts_flat'],
+                                 rays['fg_far_depth'])
             else:
                 ret = net_oracle(rays['ray_o'], rays['ray_d'],
                          rays['fg_pts_flat'], rays['bg_pts_flat'],
@@ -380,7 +380,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             box_weights = get_box_weight(box_loc=box_loc,
                                          box_size=1. / 30.,
                                          fg_z_vals=fg_z_vals_centre,
-                                         ray_d=ray_d, ray_o=ray_o).double()
+                                         ray_d=ray_d, ray_o=ray_o)
 
             ## resample from box_nerf
             # fg_weights = fg_weights + normalize_torch(box_weights)
@@ -401,7 +401,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
         if not have_box:
             ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
         else :
-            ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc)
+            ret = net(ray_o.float(), ray_d.float(), fg_far_depth.float(), fg_depth.float(), bg_depth.float(), box_loc.float())
 
         # fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
         #                                 fg_z_vals_centre, bg_z_vals_centre,
@@ -674,8 +674,8 @@ def create_nerf(rank, args):
         models['optim_oracle'] = optim
         net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
     elif args.have_box:
-        ora_net = DepthOracleWithBox(args).to(rank)
-        # ora_net = DepthOracle(args).to(rank)
+        # ora_net = DepthOracleWithBox(args).to(rank)
+        ora_net = DepthOracle(args).to(rank)
         models['net_oracle'] = WrapperModule(ora_net)
         optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
         models['optim_oracle'] = optim
@@ -810,7 +810,7 @@ def create_nerf(rank, args):
         ## ---------------new--------------- ##
         fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth"
-        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/scene_nobox_set2_fr192_K9Z5/model_570000.pth"
+        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/box_sample192_rgb64_huri_fromtrained/model_490000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle/model_995000.pth"
 
 
@@ -838,8 +838,8 @@ def create_nerf(rank, args):
             to_load_comb['net_0'][k] = to_load_comb['net_1'][k]
 
         # load scene from donerf
-        # for k in to_load_dep['net_0'].keys():
-        #     to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
+        for k in to_load_dep['net_0'].keys():
+            to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
 
         models['net_0'].load_state_dict(to_load_comb['net_0'])
         ## ---------------new--------------- ##
