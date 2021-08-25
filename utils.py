@@ -6,7 +6,7 @@ from icecream import ic
 
 
 HUGE_NUMBER = 1e10
-TINY_NUMBER = 1e-6      # float32 only has 7 decimal digits precision
+TINY_NUMBER = float(1e-6)      # float32 only has 7 decimal digits precision
 
 
 # misc utils

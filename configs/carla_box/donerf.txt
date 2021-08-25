@@ -1,3 +1,4 @@
+
 ### INPUT
 datadir = /media/diskstation/sally/
 scene = carla_15x15x20_box_set2 #big_inters_nom15_samp4x4 #carla_15x15x20_nobox_parses_seg
@@ -38,7 +39,7 @@ i_weights = 5000
 
 have_box = True
 train_box_only = False
-depth_training = True
+depth_training = False
 donerf_pretrain = False
 
 front_sample = 192

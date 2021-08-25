@@ -48,6 +48,20 @@ def intersect_sphere(ray_o, ray_d):
     return d1 + d2
 
 
+def intersect_sphere_t(ray_o, ray_d):
+    '''
+    ray_o, ray_d: [..., 3]
+    compute the depth of the intersection point between this ray and unit sphere
+    '''
+    # note: d1 becomes negative if this mid point is behind camera
+    d1 = -torch.sum(ray_d * ray_o, dim=-1) / torch.sum(ray_d * ray_d, dim=-1)
+    p = ray_o + d1.unsqueeze(-1) * ray_d
+    # consider the case where the ray does not intersect the sphere
+    ray_d_cos = 1. / torch.norm(ray_d, dim=-1)
+    d2 = torch.sqrt(1. - torch.sum(p * p, dim=-1)) * ray_d_cos
+
+    return d1 + d2
+
 def get_rays_single_image(H, W, intrinsics, c2w):
     '''
     :param H: image height
@@ -81,6 +95,26 @@ def get_rays_single_image(H, W, intrinsics, c2w):
 
     return rays_o, rays_d, depth
 
+def get_rays_scan(H, W, c2w):
+    phi = np.linspace(-np.pi, np.pi, W).astype(dtype=np.float32)
+    theta = np.linspace(-np.pi/4, np.pi/4, H,).astype(dtype=np.float32)
+
+    pv, tv = np.meshgrid(phi, theta)
+    x = np.sin(pv) * np.cos(tv)
+    y = np.sin(tv)
+    z = np.cos(pv) * np.cos(tv)
+
+    rays_d = torch.from_numpy(np.stack([x, y, z]).reshape(3, -1)).to(c2w.device)
+    rays_d = c2w[:3, :3].matmul(rays_d).T
+
+    rays_o = c2w[:3, 3].reshape((1, 3))
+    rays_o = rays_o.expand(rays_d.shape[0], -1)
+
+    depth = torch.inverse(c2w)[2, 3]
+    depth = depth * torch.ones((rays_o.shape[0],)).to(c2w.device)  # (H*W,)
+
+    return rays_o, rays_d, depth
+
 
 class RaySamplerSingleImage(object):
     def __init__(self, H, W, intrinsics=None, c2w=None,
@@ -95,6 +129,7 @@ class RaySamplerSingleImage(object):
                  seg_path=None,
                  make_class_label=None,
                  train_box_only=False,
+                 lidar_scan=False
                  ):
         super().__init__()
 
@@ -113,6 +148,7 @@ class RaySamplerSingleImage(object):
         self.train_box_only = train_box_only
 
         self.resolution_level = -1
+        self.lidar_scan = lidar_scan
         self.set_resolution_level(resolution_level, rays=rays)
 
         self.box_loc = box_loc
@@ -182,18 +218,18 @@ class RaySamplerSingleImage(object):
                 self.rays_o, self.rays_d, self.depth = rays[0].cpu().detach().numpy(), \
                                                        rays[1].cpu().detach().numpy(), \
                                                        rays[2].cpu().detach().numpy()
+            elif self.lidar_scan:
+                self.rays_o, self.rays_d, self.deepth = get_rays_scan(self.H, self.W, self.c2w_mat)
+                self.depth_sphere = intersect_sphere_t(self.rays_o, self.rays_d)
             else:
                 self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
                                                                              self.intrinsics, self.c2w_mat)
-
                 self.depth_sphere = intersect_sphere(self.rays_o, self.rays_d)
 
             self.pole_inds = None
             if self.seg_path is not None:
                 seg_map = np.array(imageio.imread(self.seg_path)[..., 0]).reshape(-1)
                 self.pole_inds = (seg_map == 5).nonzero()[0]
-
-                print(self.pole_inds.shape[0])
 
                 if self.pole_inds.shape[0] == 0:
                     self.pole_inds = None
@@ -324,12 +360,12 @@ class RaySamplerSingleImage(object):
         if self.min_depth is not None:
             min_depth = self.min_depth
         else:
-            min_depth = 1e-4 * np.ones_like(self.rays_d[..., 0])
+            min_depth = 1e-4 * torch.ones_like(self.rays_d[..., 0])
 
         if self.box_loc is None:
             box_loc = None
         else:
-            box_loc = np.tile(self.box_loc, (self.rays_d.shape[0], 1))
+            box_loc = self.box_loc.expand(self.rays_d.shape[0], -1)
 
         ret = OrderedDict([
             ('ray_o', self.rays_o),
@@ -349,11 +385,6 @@ class RaySamplerSingleImage(object):
             ('box_loc', box_loc)
 
         ])
-        # return torch tensors
-        for k in ret:
-
-            if ret[k] is not None and isinstance(ret[k], np.ndarray):
-                ret[k] = torch.from_numpy(ret[k]).to(rank)
 
         return ret
 
@@ -588,9 +619,13 @@ class RaySamplerSingleImage(object):
 
         N_rays = self.H * self.W
 
-        depth_sphere = torch.from_numpy(self.depth_sphere).to(rank)
-        rays_o = torch.from_numpy(self.rays_o).to(rank)
-        rays_d = torch.from_numpy(self.rays_d).to(rank)
+
+        if self.min_depth is None:
+            min_depth = 1e-4 * torch.ones_like(self.rays_d[..., 0])
+
+        depth_sphere = self.depth_sphere.type_as(self.rays_o)
+        rays_o = self.rays_o
+        rays_d = self.rays_d
 
         fg_far_depth = depth_sphere.to(rank)  # how far is the sphere to rayo [ H*W,]
 
