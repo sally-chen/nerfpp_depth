@@ -535,8 +535,10 @@ class NerfNetBox(nn.Module):
         ######
         # get output from boxnet
         # convert to the box coordinate
-        box_offset = (fg_pts - box_loc.unsqueeze(
-            -2)) * 0.5  # 0.5 is because the box model was trained in different coordinates before
+        # box_offset = (fg_pts - box_loc.unsqueeze(
+        #     -2)) * 0.5
+
+        box_offset = (fg_pts - box_loc.unsqueeze(-2))
         input_box = torch.cat((self.fg_embedder_position(box_offset),
                                self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
         fg_box_raw = self.box_net(input_box.float())
