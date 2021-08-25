@@ -1,4 +1,5 @@
 import os
+import torch
 import numpy as np
 import imageio
 import logging
@@ -26,7 +27,7 @@ def find_files(dir, exts):
     else:
         return []
 
-def load_data_array(intrs, poses, locs, H, W, plot, normalize=True):
+def load_data_array(intrs, poses, locs, H, W, plot, normalize=True, lidar_image=True):
 
     if plot:
         dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
@@ -39,19 +40,20 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True):
 
     for i in range(len(poses)):
         intrinsics = intrs[i]
-        pose = poses[i]
-        loc = locs[i]
+        pose = poses[i].clone()
+        loc = locs[i].clone()
 
         if normalize:
-            max = np.array([100., 140.])
-            min = np.array([85., 125.])
-            avg_pose = np.array([0.5, 0.5])
+            max = torch.tensor([100., 140.]).type_as(pose)
+            min = torch.tensor([85., 125.]).type_as(pose)
+            avg_pose = torch.tensor([0.5, 0.5]).type_as(pose)
+            print(pose.shape, loc.shape)
 
             pose[:2, 3] = ((pose[:2, 3] - min ) / (max - min) - avg_pose ) * 0.5
             loc[:2] = ((loc[:2] - min ) / (max - min) - avg_pose ) * 0.5
 
 
-        ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose, box_loc=loc))
+        ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose, box_loc=loc, lidar_scan=lidar_image))
 
 
 
