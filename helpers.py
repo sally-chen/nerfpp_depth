@@ -254,9 +254,10 @@ def get_box_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o):
     fg_pts = fg_ray_o + fg_z_vals.unsqueeze(-1) * fg_ray_d
 
 
-    box_loc[:,2] = -1.#-1.8/60.
+    # box_loc[:,2] = -1.#-1.8/60.
 
-    box_size = torch.Tensor([[1/20.,1/20.,3.]]).to(torch.cuda.current_device())
+    # box_size = torch.Tensor([[1/20.,1/20.,3.]]).to(torch.cuda.current_device())
+    box_size = torch.Tensor([[1/20.,1/20.,1/20.]]).to(torch.cuda.current_device())
 
     mins = box_loc - box_size / 2  # N, 3
     maxs = box_loc + box_size / 2  # N, 3

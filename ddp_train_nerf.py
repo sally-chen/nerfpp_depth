@@ -810,7 +810,8 @@ def create_nerf(rank, args):
         ## ---------------new--------------- ##
         fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth"
-        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/box_sample192_rgb64_huri_fromtrained/model_490000.pth"
+        # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/box_sample192_rgb64_huri_fromtrained/model_490000.pth"
+        fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/scene_nobox_set2_fr192_K9Z5/model_570000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle/model_995000.pth"
 
 
@@ -837,9 +838,9 @@ def create_nerf(rank, args):
         for k in to_load_comb['net_1'].keys():
             to_load_comb['net_0'][k] = to_load_comb['net_1'][k]
 
-        # load scene from donerf
-        for k in to_load_dep['net_0'].keys():
-            to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
+        # # load scene from donerf
+        # for k in to_load_dep['net_0'].keys():
+        #     to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
 
         models['net_0'].load_state_dict(to_load_comb['net_0'])
         ## ---------------new--------------- ##
@@ -1019,9 +1020,12 @@ def ddp_train_nerf(rank, args):
 
                 if not args.use_zval:
                     if args.have_box:
+                        # ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                        #                  ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
+                        #                  ray_batch['fg_far_depth'].float(), box_loc=ray_batch['box_loc'][:, :2])
                         ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
                                          ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
-                                         ray_batch['fg_far_depth'].float(), box_loc=ray_batch['box_loc'][:, :2])
+                                         ray_batch['fg_far_depth'].float())
 
                     else:
                         ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
@@ -1114,7 +1118,8 @@ def ddp_train_nerf(rank, args):
             if not args.have_box:
                 ret = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth, bg_depth, img_name=ray_batch['img_name'])
             else:
-                ret = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], fg_depth, bg_depth, ray_batch['box_loc'], img_name=ray_batch['img_name'])
+                ret = net(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
+                          ray_batch['fg_far_depth'].float(), fg_depth.float(), bg_depth.float(), ray_batch['box_loc'].float(), img_name=ray_batch['img_name'])
 
 
             rgb_gt = ray_batch['rgb'].to(rank)

@@ -105,7 +105,14 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         nums_new = np.zeros([3])
         # nums_new[:2] = nums + random.randint(-20,20)/100.
         nums_new[:2] = nums
-        nums_new[2] = -1
+
+        # !!! CHANGE from -1 to z-normlized value
+        z_box_scene = 1.
+        z_cam_scene = 2.8
+
+        z_box_normed = (z_box_scene - z_cam_scene) / 30.
+
+        nums_new[2] = z_box_normed
         return nums_new.astype(np.float32)
 
     if have_box:
@@ -192,8 +199,8 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     locs = []
 
     # tmp ##
-    if cam_cnt > 5:
-        cam_cnt = 5
+    # if cam_cnt > 5:
+    #     cam_cnt = 5
 
     ## tmp ##
 
