@@ -30,10 +30,10 @@ def plot_single_pose(poses, color, ax, label):
     # poses shape N, 3, 4
     ax.scatter(poses[:, 0, 3], poses[:, 1, 3], poses[:, 2, 3], marker='o', color='red', label=label)
     #
-    for i in range(poses.shape[0]):
-        ax.plot([poses[i, 0, 3], poses[i, 0, 3] + poses[i, 0, 2]],
-                [poses[i, 1, 3], poses[i, 1, 3] + poses[i, 1, 2]],
-                [poses[i, 2, 3], poses[i, 2, 3] + poses[i, 2, 2]], color='blue')
+    # for i in range(poses.shape[0]):
+    #     ax.plot([poses[i, 0, 3], poses[i, 0, 3] + poses[i, 0, 2]],
+    #             [poses[i, 1, 3], poses[i, 1, 3] + poses[i, 1, 2]],
+    #             [poses[i, 2, 3], poses[i, 2, 3] + poses[i, 2, 2]], color='blue')
 
 
 def plot_ray_batch(batch):
@@ -241,35 +241,51 @@ def loss_deviation(writer, label, pred, step, name):
     writer.add_image(name, image, step)
 
 
-def get_box_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o):
+def get_box_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, box_number=10):
     # pts: N x 128 x 3
     # assume axis aligned box
     box_loc = box_loc.clone()
 
-    dots_sh = list(ray_d.shape[:-1])
+    assert box_loc.shape == (ray_o.shape[0],box_number,3)
+
+    N_rays = list(ray_d.shape[:1])
 
     N_samples = fg_z_vals.shape[-1]
-    fg_ray_o = ray_o.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
-    fg_ray_d = ray_d.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
+    fg_ray_o = ray_o.unsqueeze(-2).expand(N_rays + [N_samples, 3])
+    fg_ray_d = ray_d.unsqueeze(-2).expand(N_rays + [N_samples, 3])
     fg_pts = fg_ray_o + fg_z_vals.unsqueeze(-1) * fg_ray_d
 
+    fg_pts = fg_pts.unsqueeze(-2).expand(N_rays + [N_samples, box_number, 3])
 
     # box_loc[:,2] = -1.#-1.8/60.
 
     # box_size = torch.Tensor([[1/20.,1/20.,3.]]).to(torch.cuda.current_device())
-    box_size = torch.Tensor([[1/20.,1/20.,1/20.]]).type_as(box_loc)
+    box_size = torch.Tensor([[1/20.,1/20.,1/20.]]).type_as(box_loc).unsqueeze(0).expand(N_rays + [box_number,3])
+
+    assert box_size.shape == (N_rays[0], box_number, 3)
 
 
-    mins = box_loc - box_size / 2  # N, 3
-    maxs = box_loc + box_size / 2  # N, 3
+    mins = box_loc - box_size / 2  # N, N_b, 3
+    maxs = box_loc + box_size / 2  # N, N_b, 3
 
 
-    mins = mins.unsqueeze(1).expand(dots_sh + [N_samples, 3])
-    maxs = maxs.unsqueeze(1).expand(dots_sh + [N_samples, 3])
+    mins = mins.unsqueeze(1).expand(N_rays + [N_samples, box_number, 3]) # N, N_sample, N_b, 3
+    maxs = maxs.unsqueeze(1).expand(N_rays + [N_samples, box_number, 3])  # N, N_sample, N_b, 3
+
+    # we give it 1 when a point falls in any of the boxes
+
+    in_boxes_compare = torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs)# N, N_samples, N_b,
+    in_boxes = torch.sum(in_boxes_compare, dim=-1) ==3 # N, N_samples, N_b,
+
+    # test = in_boxes.cpu().numpy()
+    in_any_box = torch.sum(in_boxes, dim=-1) > 0.0# N, N_samples,
 
 
     box_occupancy = torch.zeros(fg_z_vals.shape).type_as(box_loc) # N, 127
-    box_occupancy = torch.where(torch.sum(torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs), dim=-1)==3, torch.tensor(1.).type_as(box_loc), box_occupancy)
+    # box_occupancy = torch.where(torch.sum(torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs), dim=-1)==3, torch.tensor(1.).type_as(box_loc), box_occupancy)
+    box_occupancy = torch.where(in_any_box, torch.tensor(1.).type_as(box_loc), box_occupancy)
+
+    assert box_occupancy.shape == (N_rays[0], N_samples)
 
     return box_occupancy
 

@@ -338,7 +338,7 @@ class RaySamplerSingleImage(object):
                     ret[k] = torch.from_numpy(ret[k])
         return ret
 
-    def get_all_classifier(self, N_front_sample, N_back_sample, pretrain, rank, train_box_only=False):
+    def get_all_classifier(self, N_front_sample, N_back_sample, pretrain, rank, train_box_only=False, box_number=10):
 
         if self.train_box_only:
             axis_filtered_depth_flat, fg_pts_flat, fg_z_vals_centre \
@@ -360,12 +360,13 @@ class RaySamplerSingleImage(object):
         if self.min_depth is not None:
             min_depth = self.min_depth
         else:
-            min_depth = 1e-4 * torch.ones_like(self.rays_d[..., 0])
+            min_depth = 1e-4 * torch.ones_like(torch.from_numpy(self.rays_d[..., 0])).to(rank)
 
         if self.box_loc is None:
             box_loc = None
         else:
-            box_loc = self.box_loc.expand(self.rays_d.shape[0], -1)
+            box_loc = torch.from_numpy(self.box_loc).unsqueeze(0).to(rank).expand(self.rays_d.shape[0], box_number,3)
+
 
         ret = OrderedDict([
             ('ray_o', self.rays_o),
@@ -385,6 +386,10 @@ class RaySamplerSingleImage(object):
             ('box_loc', box_loc)
 
         ])
+        for k in ret:
+
+            if ret[k] is not None and isinstance(ret[k], np.ndarray):
+                ret[k] = torch.from_numpy(ret[k]).to(rank)
 
         return ret
 
@@ -619,13 +624,13 @@ class RaySamplerSingleImage(object):
 
         N_rays = self.H * self.W
 
+        depth_sphere = torch.from_numpy(self.depth_sphere).to(rank)
+        rays_o = torch.from_numpy(self.rays_o).to(rank)
+        rays_d = torch.from_numpy(self.rays_d).to(rank)
 
         if self.min_depth is None:
-            min_depth = 1e-4 * torch.ones_like(self.rays_d[..., 0])
+            min_depth = 1e-4 * torch.ones_like(rays_d[..., 0])
 
-        depth_sphere = self.depth_sphere.type_as(self.rays_o)
-        rays_o = self.rays_o
-        rays_d = self.rays_d
 
         fg_far_depth = depth_sphere.to(rank)  # how far is the sphere to rayo [ H*W,]
 
@@ -913,7 +918,7 @@ class RaySamplerSingleImage(object):
             cls_label_filtered = axis_filtered_depth_flat
 
         if self.box_loc is not None:
-            box_loc = np.tile(self.box_loc, (self.rays_d.shape[0], 1))[select_inds, :]
+            box_loc = np.tile(self.box_loc, (self.rays_d.shape[0], 1,1))[select_inds, :]
         else:
             box_loc = None
 

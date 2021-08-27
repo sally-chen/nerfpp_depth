@@ -100,13 +100,14 @@ def ddp_test_nerf(rank, args):
 
         ###### load data and create ray samplers; each process should do this
         # ray_samplers = load_data_split(args.datadir, args.scene, split, try_load_min_depth=args.load_min_depth)
-        ray_samplers_video = load_data_split_video(args.datadir, args.scene, split, try_load_min_depth=args.load_min_depth)
+        ray_samplers_video = load_data_split_video(args.datadir, args.scene, split,
+                                                   box_number=args.box_number, try_load_min_depth=args.load_min_depth)
 
 
         for idx in range(len(ray_samplers_video)):
 
-            # if idx < 8:
-            #     continue
+            if idx < 11:
+                continue
 
             print('rendering : {}'.format(idx))
             ### each process should do this; but only main process merges the results
@@ -128,7 +129,7 @@ def ddp_test_nerf(rank, args):
                                                                           front_sample=args.front_sample,
                                                                           back_sample=args.back_sample,
                                                                           fg_bg_net=args.fg_bg_net,
-                                                                          use_zval=args.use_zval, loss_type='bce',
+                                                                          use_zval=args.use_zval, loss_type='bce', box_number=args.box_number,
                                                                           rank=rank, DEBUG=False)
 
 
