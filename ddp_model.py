@@ -477,7 +477,6 @@ class NerfNetBoxOnly(nn.Module):
                            ('fg_depth', fg_depth_map*30.)])
         return ret
 
-
 class NerfNetBox(nn.Module):
     def __init__(self, args):
         super().__init__()
@@ -571,6 +570,213 @@ class NerfNetBox(nn.Module):
         fg_rgb_map = torch.sum(fg_weights.unsqueeze(-1) * fg_rgb, dim=-2)  # [..., 3]
         fg_depth_map = torch.sum(fg_weights * fg_z_vals,
                                  dim=-1)  # [...,]     ############################bg_depth_map################################
+
+        # render background
+        N_samples = bg_z_vals.shape[-1]
+        bg_ray_o = ray_o.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
+        bg_ray_d = ray_d.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
+        bg_viewdirs = viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
+
+        bg_pts, bg_depth_real = depth2pts_outside(bg_ray_o, bg_ray_d, bg_z_vals)  # [..., N_samples, 4]
+        input = torch.cat((self.bg_embedder_position(bg_pts),
+                           self.bg_embedder_viewdir(bg_viewdirs)), dim=-1)
+        # near_depth: physical far; far_depth: physical near
+        input = torch.flip(input, dims=[-2, ])
+        bg_z_vals = torch.flip(bg_z_vals, dims=[-1, ])  # 1--->0
+        bg_dists = bg_z_vals[..., :-1] - bg_z_vals[..., 1:]
+        bg_dists = torch.cat((bg_dists, HUGE_NUMBER * torch.ones_like(bg_dists[..., 0:1])), dim=-1)  # [..., N_samples]
+        bg_raw = self.bg_net(input)
+
+        ######
+        # get output from boxnet
+        ######
+
+        bg_alpha = 1. - torch.exp(-bg_raw['sigma'] * bg_dists)  # [..., N_samples]
+        # Eq. (3): T
+        # maths show weights, and summation of weights along a ray, are always inside [0, 1]
+        T = torch.cumprod(1. - bg_alpha + TINY_NUMBER, dim=-1)[..., :-1]  # [..., N_samples-1]
+        T = torch.cat((torch.ones_like(T[..., 0:1]), T), dim=-1)  # [..., N_samples]
+        bg_weights = bg_alpha * T  # [..., N_samples]
+        bg_rgb_map = torch.sum(bg_weights.unsqueeze(-1) * bg_raw['rgb'], dim=-2)  # [..., 3]
+        bg_depth_map = torch.sum(bg_weights * bg_z_vals,
+                                 dim=-1)  # [...,]  ############################bg_depth_map################################
+        # bg_depth_map = torch.sum(bg_weights * bg_depth_real, dim=-1)
+
+        # composite foreground and background
+        bg_rgb_map = bg_lambda.unsqueeze(-1) * bg_rgb_map
+
+        _, bg_depth_map = depth2pts_outside(ray_o, ray_d, bg_depth_map)
+        bg_depth_map = bg_lambda * bg_depth_map
+
+        depth_map = fg_depth_map + bg_depth_map
+
+        rgb_map = fg_rgb_map + bg_rgb_map
+        ## combine foregroung and background in the right depth unit s well
+
+        ## need inverse normalization
+        # device_num = torch.cuda.current_device()
+        #
+        # max = torch.tensor([100., 140.]).to(device_num)
+        # min = torch.tensor([85., 125.]).to(device_num)
+        # avg_pose = torch.tensor([0.5, 0.5]).to(device_num)
+        #
+        # depth_pt_denorm = ((ray_o[:, :2] + depth_map.unsqueeze(-1) * viewdirs[:, :2]) / 0.5 + avg_pose) * ( max - min) + min
+        # ro_denorm = ((ray_o[:, :2]) / 0.5 + avg_pose) * (max - min) + min
+        # depth_map = torch.norm(depth_pt_denorm[:, :2] - ro_denorm, dim=1, keepdim=False)
+        #
+        # ##
+        # ret = [rgb_map,fg_weights,bg_weights,fg_rgb_map,fg_depth_map,bg_rgb_map,bg_depth_map,bg_lambda,depth_map]
+        ## somehow denoise pls
+        ret = OrderedDict([('rgb', rgb_map),  # loss
+                           ('fg_weights', fg_weights),  # importance sampling
+                           ('bg_weights', bg_weights),  # importance sampling
+                           ('fg_rgb', fg_rgb_map),  # below are for logging
+                           ('fg_depth', fg_depth_map*30.),
+                           ('bg_rgb', bg_rgb_map),
+                           ('bg_depth', bg_depth_map*30.),
+                           ('bg_lambda', bg_lambda),
+                           ('depth_fgbg', depth_map*30.)])
+        return ret
+
+
+
+
+class NerfNetMoreBox(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        # foreground
+        self.fg_embedder_position = Embedder(input_dim=3,
+                                             max_freq_log2=args.max_freq_log2 - 1,
+                                             N_freqs=args.max_freq_log2)
+        self.fg_embedder_viewdir = Embedder(input_dim=3,
+                                            max_freq_log2=args.max_freq_log2_viewdirs - 1,
+                                            N_freqs=args.max_freq_log2_viewdirs)
+        self.fg_net = MLPNet(D=args.netdepth, W=args.netwidth,
+                             input_ch=self.fg_embedder_position.out_dim,
+                             input_ch_viewdirs=self.fg_embedder_viewdir.out_dim,
+                             use_viewdirs=args.use_viewdirs)
+        # background; bg_pt is (x, y, z, 1/r)
+        self.bg_embedder_position = Embedder(input_dim=4,
+                                             max_freq_log2=args.max_freq_log2 - 1,
+                                             N_freqs=args.max_freq_log2)
+        self.bg_embedder_viewdir = Embedder(input_dim=3,
+                                            max_freq_log2=args.max_freq_log2_viewdirs - 1,
+                                            N_freqs=args.max_freq_log2_viewdirs)
+        self.bg_net = MLPNet(D=args.netdepth, W=args.netwidth,
+                             input_ch=self.bg_embedder_position.out_dim,
+                             input_ch_viewdirs=self.bg_embedder_viewdir.out_dim,
+                             use_viewdirs=args.use_viewdirs)
+        # this is the net for the box
+
+        # input to this should be box position and sampled position
+        self.box_net = MLPNet(D=args.netdepth, W=args.netwidth,
+                              input_ch=self.fg_embedder_position.out_dim,
+                              input_ch_viewdirs=self.fg_embedder_viewdir.out_dim,
+                              use_viewdirs=args.use_viewdirs)
+
+        self.box_number = args.box_number
+
+    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only=False):
+        '''orch.c
+        :param ray_o, ray_d: [..., 3]
+        :param fg_z_max: [...,]
+        :param fg_z_vals, bg_z_vals: [..., N_samples]
+        :param box_locs: [..., 3]  (N. [x,y, z])
+        :return
+        '''
+
+        # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
+        ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
+        viewdirs = ray_d / ray_d_norm  # [..., 3]
+        dots_sh = list(ray_d.shape[:-1])
+
+        ######### render foreground
+        N_samples = fg_z_vals.shape[-1]
+        fg_ray_o = ray_o.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
+        fg_ray_d = ray_d.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
+        fg_viewdirs = viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
+        fg_pts = fg_ray_o + fg_z_vals.unsqueeze(-1) * fg_ray_d
+
+        ######
+        # get output from boxnet
+        # convert to the box coordinate
+        # box_offset = (fg_pts - box_loc.unsqueeze(
+        #     -2)) * 0.5
+
+        # box_loc(N, [x1,y1,z1,x2,y2,z2,...])
+        box_loc = box_loc.view(-1, self.box_number, 3)
+
+        fg_box_raw_lst = []
+
+        self.box_net = self.box_net.to(torch.cuda.current_device())
+
+        box_offset = (fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
+                      - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3]))\
+                        .view(dots_sh[0]*self.box_number, N_samples, 3)
+        input_box = torch.cat((self.fg_embedder_position(box_offset),
+                               self.fg_embedder_viewdir(fg_viewdirs.repeat(self.box_number,1,1))), dim=-1)
+
+        assert input_box.shape == (dots_sh[0]*self.box_number, N_samples, self.fg_embedder_position.out_dim + self.fg_embedder_viewdir.out_dim)
+
+        fg_box_raw = self.box_net(input_box.float())  # (N, *)
+        fg_box_raw_sigma = fg_box_raw['sigma'].view(dots_sh[0], self.box_number, N_samples)
+        fg_box_raw_rgb = fg_box_raw['rgb'].view(dots_sh[0], self.box_number, N_samples, 3)
+
+
+        # for i in range(self.box_number):
+        #     # box_loc[:,i,:] (N, 3)
+        #     # unsqueeze (N, 3) --> (N, 1, 3)
+        #     box_offset = (fg_pts - box_loc[:, i, :].unsqueeze(-2))
+        #     input_box = torch.cat((self.fg_embedder_position(box_offset),
+        #                            self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
+        #     # try:
+        #     fg_box_raw = self.box_net(input_box.float())  # (N, *)
+        #     # print(i, input_box.shape)
+        #     # except:
+        #     # import pdb; pdb.set_trace()
+        #     fg_box_raw_lst.append(fg_box_raw)
+
+        ######
+
+        if query_box_only:
+            ret = OrderedDict([('fg_box_sig', fg_box_raw['sigma'])])
+            return ret
+
+        input = torch.cat((self.fg_embedder_position(fg_pts),
+                           self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
+        fg_raw = self.fg_net(input)
+
+
+
+        # alpha blending
+        fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
+        # account for view directions
+        fg_dists = ray_d_norm * torch.cat((fg_dists, fg_z_max.unsqueeze(-1) - fg_z_vals[..., -1:]),
+                                          dim=-1)  # [..., N_samples]
+        fg_alpha = 1. - torch.exp(-(fg_raw['sigma'] + torch.sum(fg_box_raw_sigma, dim=1)) * fg_dists)  # [..., N_samples]
+        T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)  # [..., N_samples]
+        bg_lambda = T[..., -1]
+        T = torch.cat((torch.ones_like(T[..., 0:1]), T[..., :-1]), dim=-1)  # [..., N_samples]
+        fg_weights = fg_alpha * T  # [..., N_samples]
+
+
+        fg_rgb = torch.div(torch.sum(fg_box_raw_sigma.unsqueeze(-1) * fg_box_raw_rgb, dim=1)
+                  + fg_raw['sigma'].unsqueeze(-1) * fg_raw['rgb'],
+                  fg_raw['sigma'].unsqueeze(-1) + torch.sum(fg_box_raw_sigma, dim=1).unsqueeze(-1))
+        # fg_rgb = torch.div(
+        #     sum(fg_box_raw_lst[i]['sigma'].unsqueeze(-1) * fg_box_raw_lst[i]['rgb'] for i in range(self.box_number)) + fg_raw[
+        #         'sigma'].unsqueeze(-1) * fg_raw['rgb'],
+        #     (sum(fg_box_raw_lst[i]['sigma'] for i in range(self.box_number)) + fg_raw['sigma']).unsqueeze(-1)
+        # )
+
+        N, d = fg_raw['sigma'].shape[0], fg_raw['sigma'].shape[1]
+        assert fg_rgb.shape == (N, d, 3)
+
+
+        fg_rgb_map = torch.sum(fg_weights.unsqueeze(-1) * fg_rgb, dim=-2)  # [..., 3]
+        fg_depth_map = torch.sum(fg_weights * fg_z_vals,
+                                 dim=-1)  # [...,]
+        # ############################bg_depth_map################################
 
         # render background
         N_samples = bg_z_vals.shape[-1]
@@ -756,6 +962,40 @@ class NerfNetBoxOnlyWithAutoExpo(nn.Module):
 
         return ret
 
+class NerfNetMoreBoxWithAutoExpo(nn.Module):
+    def __init__(self, args, optim_autoexpo=False, img_names=None):
+        super().__init__()
+        self.nerf_net = NerfNetMoreBox(args)
+
+        self.optim_autoexpo = optim_autoexpo
+        if self.optim_autoexpo:
+            assert (img_names is not None)
+            logger.info('Optimizing autoexposure!')
+
+            self.img_names = [remap_name(x) for x in img_names]
+            logger.info('\n'.join(self.img_names))
+            self.autoexpo_params = nn.ParameterDict(
+                OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
+
+    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only=False, img_name=None):
+        '''
+        :param ray_o, ray_d: [..., 3]
+        :param fg_z_max: [...,]
+        :param fg_z_vals, bg_z_vals: [..., N_samples]
+        :param box_loc: [..., 3]
+        :return
+        '''
+        ret = self.nerf_net(ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only)
+
+        if img_name is not None:
+            img_name = remap_name(img_name)
+        if self.optim_autoexpo and (img_name in self.autoexpo_params):
+            autoexpo = self.autoexpo_params[img_name]
+            scale = torch.abs(autoexpo[0]) + 0.5  # make sure scale is always positive
+            shift = autoexpo[1]
+            ret['autoexpo'] = (scale, shift)
+
+        return ret
 
 class NerfNetBoxWithAutoExpo(nn.Module):
     def __init__(self, args, optim_autoexpo=False, img_names=None):

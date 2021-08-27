@@ -25,7 +25,7 @@ def find_files(dir, exts):
     else:
         return []
 
-def gen_box_locs(count=55):
+def gen_box_locs(count=55, box_number=10):
     # loc = np.linspace((87,132),(90,135),35)
 
     # loc = np.concatenate((np.random.uniform(87., 90., (count,1)),
@@ -33,11 +33,11 @@ def gen_box_locs(count=55):
 
     ct1 = 30
     ct2 = 20
-    loc1 = np.concatenate((np.random.uniform(85., 88., (ct1,1)),
-                          np.random.uniform(110., 114., (ct1,1))), axis=1)
+    loc1 = np.concatenate((np.random.uniform(85., 88., (ct1, box_number, 1)),
+                          np.random.uniform(110., 114., (ct1,box_number, 1))), axis=-1)
 
-    loc2 = np.concatenate((np.random.uniform(95., 97., (ct2,1)),
-                          np.random.uniform(111., 114., (ct2,1))), axis=1)
+    loc2 = np.concatenate((np.random.uniform(95., 97., (ct2, box_number, 1)),
+                          np.random.uniform(111., 114., (ct2, box_number,1))), axis=-1)
 
     loc = np.concatenate([loc1,loc2], axis=0)
 
@@ -51,7 +51,7 @@ def gen_box_locs(count=55):
     loc -= avg_pos[:2]
     loc *= 0.5
 
-    loc = np.concatenate((loc, -1.0 * np.ones((count,1))), axis=1)
+    loc = np.concatenate((loc, -0.06 * np.ones((count,box_number,1))), axis=-1)
 
     return loc
 
@@ -244,7 +244,8 @@ def load_pose_data(basedir):
 
     return final_product.astype(np.double), K.astype(np.double)
 
-def load_data_split_video(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False, train_seg=False, train_depth=False, have_box=True):
+def load_data_split_video(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False,
+                          train_seg=False, train_depth=False, have_box=True, box_number=10):
     def parse_txt(filename):
         assert os.path.isfile(filename)
         nums = open(filename).read().split()
@@ -321,7 +322,7 @@ def load_data_split_video(basedir, scene, split, skip=1, try_load_min_depth=True
     else:
         depth_files = [None, ] * cam_cnt
 
-    cube_loc = gen_box_locs(trajectory_pose.shape[0])
+    cube_loc = gen_box_locs(trajectory_pose.shape[0], box_number)
 
     # assume all images have the same size as training image
     train_imgfile = find_files('{}/{}/train/rgb'.format(basedir, scene), exts=['*.png', '*.jpg'])[0]

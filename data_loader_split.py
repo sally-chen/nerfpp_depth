@@ -61,7 +61,7 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True, lidar_image=
     # max_depth=max_depth, box_loc=locs[i]))
 
 def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False, have_box = False,
-                    train_depth=False, train_seg = False,  train_box_only=False, custom_rays=None):
+                    train_depth=False, train_seg = False,  train_box_only=False, custom_rays=None, box_number=10):
 
     def parse_txt(filename):
         assert os.path.isfile(filename)
@@ -90,9 +90,11 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     pose_files = pose_files[::skip]
     cam_cnt = len(pose_files)
 
-    def parse_txt_loc(filename, norm=False):
+    def parse_txt_loc(filename, norm=False, box_number=10):
         nums = open(filename).read().split()
         nums = np.array([float(x) for x in nums])
+
+        nums = nums.reshape(box_number, 2)
 
         if norm:
             max = np.array([100,140])
@@ -104,9 +106,9 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
             nums -= avg_pos
             nums *= 0.5
 
-        nums_new = np.zeros([3])
+        nums_new = np.zeros([box_number, 3])
         # nums_new[:2] = nums + random.randint(-20,20)/100.
-        nums_new[:2] = nums
+        nums_new[:,:2] = nums
 
         # !!! CHANGE from -1 to z-normlized value
         z_box_scene = 1.
@@ -114,7 +116,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
         z_box_normed = (z_box_scene - z_cam_scene) / 30.
 
-        nums_new[2] = z_box_normed
+        nums_new[:,2] = z_box_normed
         return nums_new.astype(np.float32)
 
     if have_box:
@@ -281,20 +283,31 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     #     poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
     #
     #     if have_box:
-    #         locs[i][:2] = (locs[i][:2] / 0.5 + avg_pose) * (max - min) + min
+    #         locs[i][:,:2] = (locs[i][:,:2] / 0.5 + avg_pose) * (max - min) + min
     # if not have_box:
     #     plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
     #                 ['scene poses'])
     # #
     # else:
-    #     dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
-    #     locs = np.stack(locs, axis=0)
-    #     dummy_pose_loc[:,:3, 3] = locs
-    #     plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses {} nerf ++'.format(split),
-    #                    ['scene poses','box'])
-
-
+    #     # dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
+    #     # locs = np.stack(locs, axis=0)
+    #     # dummy_pose_loc[:,:3, 3] = locs
+    #     # plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses {} nerf ++'.format(split),
+    #     #                ['scene poses','box'])
     #
+    #     locs = np.stack(locs, axis=0)  # (N, 30)
+    #
+    #
+    #     dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape[0]*10,3,4))
+    #     dummy_pose_loc[:, :3, 3] = np.reshape(locs, (np.stack(poses, axis=0).shape[0]*10,3))
+    #
+    #
+    #     if (split == 'train'):
+    #         plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
+    #                        ['scene poses', 'box'])
+
+
+
     # filename = split_dir + '/sample_arrs'
     # outfile = open(filename, 'wb')
     # pickle.dump([poses, intrins, locs], outfile)
