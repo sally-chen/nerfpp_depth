@@ -10,6 +10,9 @@ from torchvision.transforms import ToTensor
 import io
 import torch
 
+from utils import normalize_torch
+
+TINY_NUMBER = float(1e-6)
 
 def plot_mult_pose(poses_list, name, labels):
     fig = plt.figure()
@@ -239,6 +242,102 @@ def loss_deviation(writer, label, pred, step, name):
     image = ToTensor()(image)
 
     writer.add_image(name, image, step)
+
+def triangle_filter( occupancy, Z=5):
+
+    '''
+    occupancy: [N_rays, N_samples  ] value: 000000NNNN00000000
+
+    '''
+
+    tri_filter = []
+
+    Z_half_floor = np.floor(Z / 2)
+    for i in range(int(-Z_half_floor), int(Z_half_floor) + 1):
+        tri_filter.append((Z_half_floor + 1 - np.absolute(i)) / (Z_half_floor + 1))
+    tri_filter = torch.Tensor(tri_filter).unsqueeze(0).unsqueeze(0).type_as(occupancy)  ## need to be [1, 1, Z]
+    # test15 = cls_label_flat.detach().cpu().numpy()
+
+    occupancy_filtered = torch.squeeze(
+        torch.nn.functional.conv1d(occupancy.unsqueeze(-2), tri_filter, padding=int(Z_half_floor)))
+
+    occupancy_filtered[occupancy_filtered > 1.] = 1.
+    occupancy_filtered[occupancy_filtered < 0.] = 0.
+
+    return occupancy_filtered
+
+def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_depth,box_number=10):
+    # pts: N x 128 x 3
+    # assume axis aligned box
+
+    multiplier = 10
+    box_loc = box_loc.clone()
+
+    assert box_loc.shape == (ray_o.shape[0], box_number, 3)
+
+    N_rays = list(ray_d.shape[:1])
+
+    N_samples = fg_z_vals.shape[-1]
+    fg_ray_o = ray_o.unsqueeze(-2).expand(N_rays + [N_samples, 3])
+    fg_ray_d = ray_d.unsqueeze(-2).expand(N_rays + [N_samples, 3])
+    fg_pts = fg_ray_o + fg_z_vals.unsqueeze(-1) * fg_ray_d
+
+    fg_pts = fg_pts.unsqueeze(-2).expand(N_rays + [N_samples, box_number, 3])
+
+    # box_loc[:,2] = -1.#-1.8/60.
+
+    # box_size = torch.Tensor([[1/20.,1/20.,3.]]).to(torch.cuda.current_device())
+    box_size = torch.Tensor([[1 / 25., 1 / 25., 1/25.]]).type_as(box_loc).unsqueeze(0).expand(
+        N_rays + [box_number, 3])
+
+    assert box_size.shape == (N_rays[0], box_number, 3)
+
+    mins = box_loc - box_size / 2  # N, N_b, 3
+    maxs = box_loc + box_size / 2  # N, N_b, 3
+
+    mins = mins.unsqueeze(1).expand(N_rays + [N_samples, box_number, 3])  # N, N_sample, N_b, 3
+    maxs = maxs.unsqueeze(1).expand(N_rays + [N_samples, box_number, 3])  # N, N_sample, N_b, 3
+
+    # we give it 1 when a point falls in any of the boxes
+
+    in_boxes_compare = torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs)  # N, N_samples, N_b,
+    in_boxes = torch.sum(in_boxes_compare, dim=-1) == 3  # N, N_samples, N_b,
+
+    # test = in_boxes.cpu().numpy()
+    in_any_box = torch.sum(in_boxes, dim=-1) > 0.0  # N, N_samples,
+
+    box_occupancy = torch.zeros(fg_z_vals.shape).type_as(box_loc)  # N, 127
+    # box_occupancy = torch.where(torch.sum(torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs), dim=-1)==3, torch.tensor(1.).type_as(box_loc), box_occupancy)
+    box_occupancy = torch.where(in_any_box, torch.tensor(1.).type_as(box_loc), box_occupancy)
+
+    assert box_occupancy.shape == (N_rays[0], N_samples)
+
+    box_occupancy_filtered = triangle_filter(box_occupancy, Z=7) * multiplier
+
+    assert box_occupancy_filtered.shape == (N_rays[0], N_samples)
+
+
+    # alpha blending
+    ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
+
+    fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
+    # account for view directions
+    fg_dists = ray_d_norm * torch.cat((fg_dists, fg_depth.unsqueeze(-1) - fg_z_vals[..., -1:]),
+                                      dim=-1)  # [..., N_samples]
+    fg_alpha = 1. - torch.exp(-box_occupancy_filtered * fg_dists)  # [..., N_samples]
+    T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)  # [..., N_samples]
+    T = torch.cat((torch.ones_like(T[..., 0:1]), T[..., :-1]), dim=-1)  # [..., N_samples]
+    fg_weights = fg_alpha * T  # [..., N_samples]
+
+    fg_weights_normed = normalize_torch(fg_weights)
+    # if torch.sum(torch.sum(box_occupancy_filtered, dim=-1)) > 0:
+    #     print("STOP HERE")
+    #     test_box_occ = box_occupancy.cpu().numpy()
+    #     test_box_occ_fil = box_occupancy_filtered.cpu().numpy()
+    #     test_fg_alpha = fg_alpha.cpu().numpy()
+    #     test_T = T.cpu().numpy()
+    #     test_fg_weights = fg_weights_normed.cpu().numpy()
+    return fg_weights_normed
 
 
 def get_box_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, box_number=10):
