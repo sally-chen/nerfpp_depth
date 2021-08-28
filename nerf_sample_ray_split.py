@@ -229,8 +229,8 @@ class RaySamplerSingleImage(object):
             self.pole_inds = None
             if self.seg_path is not None:
                 seg_map = np.array(imageio.imread(self.seg_path)[..., 0]).reshape(-1)
-                self.pole_inds = (seg_map == 5).nonzero()[0]
-
+                self.pole_inds = (seg_map == 3).nonzero()[0] #5 is pole 3 is box
+                print('seg inds length {}'.format(self.pole_inds.shape[0]))
                 if self.pole_inds.shape[0] == 0:
                     self.pole_inds = None
 

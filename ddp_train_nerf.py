@@ -20,7 +20,7 @@ import numpy as np
 from tensorboardX import SummaryWriter
 from utils import img2mse, mse2psnr, entropy_loss, crossEntropy, dep_l1l2loss, img_HWC2CHW, colorize, colorize_np,to8b, normalize_torch,TINY_NUMBER
 
-from helpers import calculate_metrics, log_plot_conf_mat, visualize_depth_label, loss_deviation
+from helpers import calculate_metrics, log_plot_conf_mat, visualize_depth_label, loss_deviation, get_box_transmittance_weight
 import logging
 import json
 
@@ -355,10 +355,15 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
         if box_loc is not None:
             from helpers import get_box_weight
-            box_weights = get_box_weight(box_loc=box_loc,
-                                         box_size=1. / 30.,
-                                         fg_z_vals=fg_z_vals_centre,
-                                         ray_d=ray_d, ray_o=ray_o, box_number=box_number)
+            # box_weights = get_box_weight(box_loc=box_loc,
+            #                              box_size=1. / 30.,
+            #                              fg_z_vals=fg_z_vals_centre,
+            #                              ray_d=ray_d, ray_o=ray_o, box_number=box_number)
+
+            box_weights = get_box_transmittance_weight(box_loc=box_loc, box_size=1. / 30.,
+                                         fg_z_vals=fg_z_vals_centre,  ray_d=ray_d,
+                                         ray_o=ray_o,
+                                         fg_depth=fg_far_depth, box_number=box_number)
 
             ## resample from box_nerf
             # fg_weights = fg_weights + normalize_torch(box_weights)
@@ -515,8 +520,13 @@ def create_nerf(rank, args):
 
         fpath = ckpts[-1]
         logger.info('Reloading from: {}'.format(fpath))
-        # start = path2iter(fpath)
-        start = 0
+        start = path2iter(fpath)
+        # start = 0
+
+
+
+
+
         # configure map_location properly for different processes
         map_location = 'cuda:%d' % rank
 
@@ -610,6 +620,7 @@ def create_nerf(rank, args):
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/box_sample192_rgb64_huri_fromtrained/model_490000.pth"
         fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/box_sample192_rgb64_boxcorrect/model_725000.pth"
+        # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/scene_nobox_set2_fr192_K9Z5//model_575000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle/model_995000.pth"
 
 
@@ -822,9 +833,13 @@ def ddp_train_nerf(rank, args):
                     # option2
                     # lets test this --- we are gettin occupancy only, maybe we could get transmittance
                     from helpers import get_box_weight
-                    box_weights = get_box_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
-                                                 fg_z_vals=ray_batch['fg_z_vals_centre'],
-                                                 ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'], box_number=args.box_number )
+                    # box_weights = get_box_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
+                    #                              fg_z_vals=ray_batch['fg_z_vals_centre'],
+                    #                              ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'], box_number=args.box_number )
+
+                    box_weights = get_box_transmittance_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
+                                                               fg_z_vals=ray_batch['fg_z_vals_centre'], ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'],
+                                                               fg_depth=ray_batch['fg_far_depth'], box_number=args.box_number)
                     box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
 
                     fg_weights = fg_weights + normalize_torch(box_weights)

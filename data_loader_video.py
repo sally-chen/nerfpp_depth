@@ -52,6 +52,7 @@ def gen_box_locs(count=55, box_number=10):
     loc *= 0.5
 
     loc = np.concatenate((loc, -0.06 * np.ones((count,box_number,1))), axis=-1)
+    # loc = np.concatenate((loc, -1. * np.ones((count,box_number,1))), axis=-1)
 
     return loc
 

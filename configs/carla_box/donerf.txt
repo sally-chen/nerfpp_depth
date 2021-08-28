@@ -2,7 +2,7 @@
 ### INPUT
 datadir = /media/diskstation/sally/data/
 scene = carla_15x15x20_10box_set2 #big_inters_nom15_samp4x4 #carla_15x15x20_nobox_parses_seg
-expname = box_sample192_rgb64_10box
+expname = box_sample192_rgb64_10box_transmfilter
 basedir = /home/sally/nerf_clone/nerfpp_depth/logs
 config = None
 ckpt_path = None
@@ -11,7 +11,7 @@ testskip = 1
 
 ### TRAINING
 N_iters = 1000001
-N_rand = 512
+N_rand = 1024
 lrate = 0.0005
 lrate_decay_factor = 0.1
 lrate_decay_steps = 5000
@@ -21,7 +21,7 @@ cascade_level = 1
 cascade_samples = 64
 
 ### TESTING
-chunk_size = 2000
+chunk_size = 4096
 
 ### RENDERING
 det = False
@@ -32,14 +32,14 @@ netwidth = 256
 use_viewdirs = True
 
 ### CONSOLE AND TENSORBOARD
-i_img = 100
+i_img = 1000
 i_print = 50
 i_weights = 5000
 
 
 have_box = True
 train_box_only = False
-depth_training = False
+depth_training = True
 donerf_pretrain = False
 
 front_sample = 192
@@ -54,7 +54,7 @@ penc_pts = False
 max_freq_log2_pts=3
 world_size=1
 
-train_seg = False
+train_seg = True
 
 box_number = 10
 
