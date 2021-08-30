@@ -669,7 +669,7 @@ class NerfNetMoreBox(nn.Module):
         # this is the net for the box
 
         # input to this should be box position and sampled position
-        self.box_net = MLPNet(D=args.netdepth, W=args.netwidth,
+        self.box_net = MLPNet(D=4, W=args.netwidth,
                               input_ch=self.fg_embedder_position.out_dim,
                               input_ch_viewdirs=self.fg_embedder_viewdir.out_dim,
                               use_viewdirs=args.use_viewdirs)
