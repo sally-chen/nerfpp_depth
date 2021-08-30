@@ -359,7 +359,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             #                              box_size=1. / 30.,
             #                              fg_z_vals=fg_z_vals_centre,
             #                              ray_d=ray_d, ray_o=ray_o, box_number=box_number)
-
+            #
             box_weights = get_box_transmittance_weight(box_loc=box_loc, box_size=1. / 30.,
                                          fg_z_vals=fg_z_vals_centre,  ray_d=ray_d,
                                          ray_o=ray_o,
@@ -644,14 +644,21 @@ def create_nerf(rank, args):
         #
 
         # load scene & box from comb
-        for k in to_load_comb['net_1'].keys():
-            to_load_comb['net_0'][k] = to_load_comb['net_1'][k]
+        # for k in to_load_comb['net_1'].keys():
+        #     to_load_comb['net_0'][k] = to_load_comb['net_1'][k]
+        #
+        # # load scene from donerf
+        # for k in to_load_dep['net_0'].keys():
+        #     to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
 
-        # load scene from donerf
-        for k in to_load_dep['net_0'].keys():
-            to_load_comb['net_0'][k] = to_load_dep['net_0'][k]
+        # models['net_0'].load_state_dict(to_load_comb['net_0'])
 
-        models['net_0'].load_state_dict(to_load_comb['net_0'])
+        # for load weights without box
+
+        model_dict_old = models['net_0'].state_dict()
+        model_dict = {k: v  for k,v in to_load_dep['net_0'].items() if k in model_dict_old}
+        models['net_0'].load_state_dict(model_dict)
+
         ## ---------------new--------------- ##
 
 
