@@ -203,8 +203,8 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     locs = []
 
     # tmp ##
-    if cam_cnt > 500:
-        cam_cnt = 500
+    # if cam_cnt > 500:
+    #     cam_cnt = 500
 
     ## tmp ##
 

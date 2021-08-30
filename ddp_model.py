@@ -713,8 +713,11 @@ class NerfNetMoreBox(nn.Module):
         box_offset = (fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
                       - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3]))\
                         .view(dots_sh[0]*self.box_number, N_samples, 3)
+
+        expanded_viewdir = fg_viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
+        expanded_viewdir_reshape = expanded_viewdir.reshape(dots_sh[0]*self.box_number, N_samples, 3)
         input_box = torch.cat((self.fg_embedder_position(box_offset),
-                               self.fg_embedder_viewdir(fg_viewdirs.repeat(self.box_number,1,1))), dim=-1)
+                               self.fg_embedder_viewdir(expanded_viewdir_reshape)), dim=-1)
 
         assert input_box.shape == (dots_sh[0]*self.box_number, N_samples, self.fg_embedder_position.out_dim + self.fg_embedder_viewdir.out_dim)
 
