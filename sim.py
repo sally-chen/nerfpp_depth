@@ -17,27 +17,36 @@ import logging
 import random
 import pickle
 
+from scipy.spatial.transform import Rotation
+
 logger = logging.getLogger(__package__)
 
 class Sim:
-    def __init__(self, args, frame_height, frame_width, max_depth):
+    def __init__(self, args, frame_height, frame_width, max_depth, camera):
         #setup(0, args.world_size)
         self.args = args
         self.start, self.models = create_nerf(0, args)
         self.h = frame_height
         self.w = frame_width
+        self.camera = camera
 
 
 
     @torch.no_grad()
-    def run(self, x, c, max_depth=60, rgb=False):
+    def run(self, x, c, intrs=None, max_depth=60, rgb=False):
 
-        ray_samplers = load_data_array([torch.eye(4)], [x], [c],
-                self.h, self.w, False, True)
+        intrs = torch.tensor([[380.,   0., 320.,   0.],
+                            [  0., 380., 180.,   0.],
+                            [  0.,   0.,   1.,   0.],
+                            [  0.,   0.,   0.,   1.]]).type_as(x)
+
+        ray_samplers = load_data_array([intrs], [x], [c],
+                self.h, self.w, False, True, not self.camera)
 
         time0 = time.time()
-        ret = render_single_image(self.models, ray_samplers[0], 256,
+        ret = render_single_image(self.models, ray_samplers[0], self.args.chunk_size,
                                   have_box=self.args.have_box,
+                                  box_number=self.args.box_number,
                                   train_box_only=self.args.train_box_only,
                                   donerf_pretrain=self.args.donerf_pretrain,
                                   front_sample=self.args.front_sample,
@@ -77,32 +86,70 @@ def test():
     [poses, intrs, locs] = pickle.load(
             open('sample_arrs', 'rb'))
 
-    H = 32 # high of image desired
-    W = 100 # width of image desired
+    H = 320 # high of image desired
+    W = 640 # width of image desired
     depth_clip = 60.  # clip depth
+
 
     intrs = [torch.from_numpy(intr).cuda() for intr in intrs]
     poses = [torch.from_numpy(pose).cuda().requires_grad_(True) for pose in poses]
     locs = [torch.from_numpy(loc).cuda().requires_grad_(True) for loc in locs]
 
+    cube = torch.tensor([[90., 122., -1], [85, 122, -1], [80, 120, -1]]).cuda()
+    pos = torch.tensor([92.4, 124.]).cuda()
 
     sim = Sim(args, H, W, depth_clip)
     i = 0
-    print(locs[0].shape)
+    torch.autograd.set_detect_anomaly(True)
+    steps = 20
+    for k in range(steps):
+        yaw = -np.pi + k * 2 * np.pi / steps
+        T = torch.eye(4).cuda()
+        T[:2, 3] = pos
 
-    rgb, d = sim.run(poses[0], locs[0], rgb=True)
-    brgb = to8b(rgb.detach().cpu().numpy())
-    bd = colorize_np(d.detach().cpu().numpy(), cmap_name='jet', append_cbar=True)
-    bd = to8b(bd)
-    imageio.imwrite("rgb_{}.png".format(i), brgb)
-    imageio.imwrite("d_{}.png".format(i), bd)
+        P = yaw_to_mat(torch.tensor([yaw]).cuda()).squeeze().requires_grad_(True)
+        T[:3, :3] = P
+
+        rgb, d = sim.run(T, cube, intrs=intrs[0], rgb=True)
+#        A = rgb.sum()
+#        A.backward()
+#        print(P.grad)
+        brgb = to8b(rgb.detach().cpu().numpy())
+        bd = colorize_np(d.detach().cpu().numpy(), cmap_name='jet', append_cbar=True)
+        bd = to8b(bd)
+        imageio.imwrite("rgb_{}.png".format(k), brgb)
+        imageio.imwrite("d_{}.png".format(k), bd)
+
 #    A = d.sum()
 #    A.backward()
 #    print(poses[0].grad)
 
+def yaw_to_mat(yaws):
+
+    Rp = torch.tensor([[0., 0., 1.,], [1., 0., 0.], [0., -1., 0.]]).type_as(yaws)
+    yaws = yaws.view(-1, 1)
+
+    cos = yaws.cos()
+    sin = yaws.sin()
+
+    K = torch.tensor([[0., -1., 0.],
+                      [1., 0., 0.],
+                      [0., 0., 0.]], device=yaws.device)
+
+    K = torch.tensor([[0., 0., 1.], [0., 0., 0.], [-1., 0., 0.]]).type_as(yaws)
+    KK = K.mm(K)
+    KK = KK.expand(yaws.shape[0], -1, -1)
+    K = K.expand(yaws.shape[0], -1, -1)
+
+    I = torch.eye(3, device=yaws.device).expand(yaws.shape[0], -1,  -1)
+
+    R = I +  sin.view(-1, 1, 1) * K + (1 - cos).view(-1, 1, 1) * KK
+    Rf = torch.matmul(Rp, R)
+
+    return Rf
 
 
-def make_sim(config_path, channels, width, depth=60.):
+def make_sim(config_path, frame_height, frame_width, depth=60., camera=False):
     parser = config_parser()
     args = parser.parse_args("--config " + config_path)
     logger.info(parser.format_values())
@@ -111,7 +158,7 @@ def make_sim(config_path, channels, width, depth=60.):
         args.world_size = torch.cuda.device_count()
         logger.info('Using # gpus: {}'.format(args.world_size))
 
-    sim = Sim(args, channels, width, depth)
+    sim = Sim(args, frame_height, frame_width, depth, camera)
 
     return sim
 

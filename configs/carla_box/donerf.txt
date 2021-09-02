@@ -1,9 +1,9 @@
 
 ### INPUT
-datadir = /media/diskstation/sally/data/
-scene = carla_15x15x20_6box_set2 #big_inters_nom15_samp4x4 #carla_15x15x20_nobox_parses_seg
-expname = box_sample192_rgb64_6box_netd4_transm25-m10
-basedir = /home/sally/nerf_clone/nerfpp_depth/logs
+datadir = logs
+scene = boxoracle
+expname = box_oracle
+basedir = logs
 config = None
 ckpt_path = None
 no_reload = False
@@ -56,5 +56,5 @@ world_size=1
 
 train_seg = False
 
-box_number = 10
+box_number = 3
 
