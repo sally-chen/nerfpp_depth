@@ -270,7 +270,7 @@ def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_
     # pts: N x 128 x 3
     # assume axis aligned box
 
-    multiplier = 10
+    multiplier = 60
     box_loc = box_loc.clone()
 
     assert box_loc.shape == (ray_o.shape[0], box_number, 3)
@@ -287,7 +287,7 @@ def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_
     # box_loc[:,2] = -1.#-1.8/60.
 
     # box_size = torch.Tensor([[1/20.,1/20.,3.]]).to(torch.cuda.current_device())
-    box_size = torch.Tensor([[1 / 25., 1 / 25., 1/25.]]).type_as(box_loc).unsqueeze(0).expand(
+    box_size = torch.Tensor([[1 / 26., 1 / 26., 1/26.]]).type_as(box_loc).unsqueeze(0).expand(
         N_rays + [box_number, 3])
 
     assert box_size.shape == (N_rays[0], box_number, 3)
@@ -312,7 +312,7 @@ def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_
 
     assert box_occupancy.shape == (N_rays[0], N_samples)
 
-    box_occupancy_filtered = triangle_filter(box_occupancy, Z=7) * multiplier
+    box_occupancy_filtered = triangle_filter(box_occupancy, Z=3) * multiplier
 
     assert box_occupancy_filtered.shape == (N_rays[0], N_samples)
 
@@ -337,7 +337,7 @@ def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_
     #     test_fg_alpha = fg_alpha.cpu().numpy()
     #     test_T = T.cpu().numpy()
     #     test_fg_weights = fg_weights_normed.cpu().numpy()
-    return fg_weights_normed
+    return fg_weights_normed * 5
 
 
 def get_box_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, box_number=10):
@@ -359,7 +359,7 @@ def get_box_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, box_number=10):
     # box_loc[:,2] = -1.#-1.8/60.
 
     # box_size = torch.Tensor([[1/20.,1/20.,3.]]).to(torch.cuda.current_device())
-    box_size = torch.Tensor([[1/20.,1/20.,1/20.]]).type_as(box_loc).unsqueeze(0).expand(N_rays + [box_number,3])
+    box_size = torch.Tensor([[1/25.,1/25.,1/25.]]).type_as(box_loc).unsqueeze(0).expand(N_rays + [box_number,3])
 
     assert box_size.shape == (N_rays[0], box_number, 3)
 
@@ -377,7 +377,7 @@ def get_box_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, box_number=10):
     in_boxes = torch.sum(in_boxes_compare, dim=-1) ==3 # N, N_samples, N_b,
 
     # test = in_boxes.cpu().numpy()
-    in_any_box = torch.sum(in_boxes, dim=-1) > 0.0# N, N_samples,
+    in_any_box = torch.sum(in_boxes, dim=-1) > 0# N, N_samples,
 
 
     box_occupancy = torch.zeros(fg_z_vals.shape).type_as(box_loc) # N, 127
