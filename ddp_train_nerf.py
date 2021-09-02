@@ -289,7 +289,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         # fg_weights = fg_weights + normalize_torch(box_weights[:, 1:])
 
         # box_norm_test = normalize_torch(box_weights).cpu().numpy()
-        fg_weights = fg_weights + normalize_torch(box_weights)
+        fg_weights = fg_weights + box_weights
 
     fg_weights[fg_z_vals_centre < 0.0002] = float(0.0)
 
@@ -359,7 +359,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             #                              box_size=1. / 30.,
             #                              fg_z_vals=fg_z_vals_centre,
             #                              ray_d=ray_d, ray_o=ray_o, box_number=box_number)
-            #
+
             box_weights = get_box_transmittance_weight(box_loc=box_loc, box_size=1. / 30.,
                                          fg_z_vals=fg_z_vals_centre,  ray_d=ray_d,
                                          ray_o=ray_o,
