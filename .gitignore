@@ -3,3 +3,5 @@
 /data
 /__pycache__
 
+public/photos
+data_train/carla_15x15x20_10box_set2.tar
