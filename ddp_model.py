@@ -722,24 +722,51 @@ class NerfNetMoreBox(nn.Module):
         assert input_box.shape == (dots_sh[0]*self.box_number, N_samples, self.fg_embedder_position.out_dim + self.fg_embedder_viewdir.out_dim)
 
         fg_box_raw = self.box_net(input_box.float())  # (N, *)
-        fg_box_raw_sigma = fg_box_raw['sigma'].view(dots_sh[0], self.box_number, N_samples)
+
+
+        fg_box_raw_sigma__ = fg_box_raw['sigma'].view(dots_sh[0], self.box_number, N_samples)
         fg_box_raw_rgb = fg_box_raw['rgb'].view(dots_sh[0], self.box_number, N_samples, 3)
 
+        def filter_sigma(fg_box_raw_sigma_, box_loc, fg_z_vals, fg_pts):
 
-        # for i in range(self.box_number):
-        #     # box_loc[:,i,:] (N, 3)
-        #     # unsqueeze (N, 3) --> (N, 1, 3)
-        #     box_offset = (fg_pts - box_loc[:, i, :].unsqueeze(-2))
-        #     input_box = torch.cat((self.fg_embedder_position(box_offset),
-        #                            self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
-        #     # try:
-        #     fg_box_raw = self.box_net(input_box.float())  # (N, *)
-        #     # print(i, input_box.shape)
-        #     # except:
-        #     # import pdb; pdb.set_trace()
-        #     fg_box_raw_lst.append(fg_box_raw)
+            box_size = torch.Tensor([[1 / 25., 1 / 25., 1 / 25.]]).type_as(box_loc).unsqueeze(0).expand(
+                dots_sh + [self.box_number, 3])
 
-        ######
+            assert box_size.shape == (dots_sh[0], self.box_number, 3)
+
+            mins = box_loc - box_size / 2  # N, N_b, 3
+            maxs = box_loc + box_size / 2  # N, N_b, 3
+
+            mins = mins.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])  # N, N_sample, N_b, 3
+            maxs = maxs.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])  # N, N_sample, N_b, 3
+
+            fg_pts_ = fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
+
+            # we give it 1 when a point falls in any of the boxes
+
+            in_boxes_compare = torch.gt(fg_pts_, mins) & torch.lt(fg_pts_, maxs)  # N, N_samples, N_b,
+            in_boxes = torch.sum(in_boxes_compare, dim=-1) == 3  # N, N_samples, N_b,
+
+            if torch.sum(torch.sum(in_boxes, dim=-1)) > 0:
+
+                test = fg_box_raw_sigma_.cpu().numpy()
+                test_inb = in_boxes.cpu().numpy()
+
+
+            box_occupancy = torch.zeros(fg_box_raw_sigma_.shape).type_as(box_loc)  # N, 127
+            # box_occupancy = torch.where(torch.sum(torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs), dim=-1)==3, torch.tensor(1.).type_as(box_loc), box_occupancy)
+            box_occupancy = torch.where(torch.transpose(in_boxes, 1, 2), fg_box_raw_sigma_, box_occupancy)
+
+            assert box_occupancy.shape == (dots_sh[0], self.box_number, N_samples)
+
+            return box_occupancy
+
+
+        fg_box_raw_sigma = fg_box_raw_sigma__#filter_sigma(fg_box_raw_sigma__, box_loc, fg_z_vals, fg_pts)
+
+        #test = fg_box_raw_sigma.cpu().numpy()
+        #test_rgb = fg_box_raw_rgb.cpu().numpy()
+
 
         if query_box_only:
             ret = OrderedDict([('fg_box_sig', fg_box_raw['sigma'])])

@@ -48,7 +48,7 @@ def gen_box_locs(count=55, box_number=10):
     avg_pos = np.array([0.5, 0.5, 0.0])
     loc -= min[:2]
     loc /= (max_minus_min)[:2]
-    # print(loc)
+    # print(loc)![](logs/box_sample192_rgb64_6box_transm25-m10/render_test_525000/000008.png)
     loc -= avg_pos[:2]
     loc *= 0.5
 
