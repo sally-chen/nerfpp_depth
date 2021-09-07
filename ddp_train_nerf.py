@@ -399,7 +399,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
         if box_weights is None:
             ret['likeli_fg'] = ret_or['likeli_fg']
         else:
-            ret['likeli_fg'] = torch.sigmoid(ret_or['likeli_fg']) + normalize_torch(box_weights)
+            ret['likeli_fg'] = torch.sigmoid(ret_or['likeli_fg']) + (box_weights)
 
         ret['likeli_bg'] = ret_or['likeli_bg']
         #
@@ -849,7 +849,7 @@ def ddp_train_nerf(rank, args):
                                                                fg_depth=ray_batch['fg_far_depth'], box_number=args.box_number)
                     box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
 
-                    fg_weights = fg_weights + normalize_torch(box_weights)
+                    fg_weights = fg_weights + (box_weights)
 
 
             fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights[:, 1:args.front_sample-1],
