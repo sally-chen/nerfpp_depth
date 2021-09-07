@@ -749,8 +749,6 @@ def ddp_train_nerf(rank, args):
 
         optim_oracle.zero_grad()
 
-        fg_mid = 0.5 * (ray_batch['fg_z_vals_centre'][:, 1:] + ray_batch['fg_z_vals_centre'][:, :-1])
-        bg_mid = 0.5 * (ray_batch['bg_z_vals_centre'][:, 1:] + ray_batch['bg_z_vals_centre'][:, :-1])
 
         if args.donerf_pretrain:
 
@@ -814,7 +812,13 @@ def ddp_train_nerf(rank, args):
             # sample depths
             N_samples = models['cascade_samples'][0]
 
-            fg_depth_mid = fg_mid
+            perturbed_seg_bound_fg = perturb_samples(ray_batch['fg_z_vals_centre']) #fg_z_vals_centre is actually the z_vals of seg bounds. pts are mid pints
+            perturbed_seg_bound_bg = perturb_samples(ray_batch['bg_z_vals_centre']) #fg_z_vals_centre is actually the z_vals of seg bounds. pts are mid pints
+
+            fg_mid = 0.5 * (perturbed_seg_bound_fg[:, 1:] + perturbed_seg_bound_fg[:, :-1])
+            bg_mid = 0.5 * (perturbed_seg_bound_bg[:, 1:] + perturbed_seg_bound_bg[:, :-1])
+
+
 
             # fg_weights = ray_batch['cls_label'][:,:args.front_sample]
             fg_weights = ret['likeli_fg']
@@ -845,25 +849,24 @@ def ddp_train_nerf(rank, args):
                     #                              ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'], box_number=args.box_number )
 
                     box_weights = get_box_transmittance_weight(box_loc=ray_batch['box_loc'], box_size=args.box_size,
-                                                               fg_z_vals=ray_batch['fg_z_vals_centre'], ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'],
+                                                               fg_z_vals=perturbed_seg_bound_fg, ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'],
                                                                fg_depth=ray_batch['fg_far_depth'], box_number=args.box_number)
                     box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
 
                     fg_weights = fg_weights + (box_weights)
 
 
-            fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights[:, 1:args.front_sample-1],
+            fg_depth,_ = torch.sort(sample_pdf(bins=fg_mid, weights=fg_weights[:, 1:args.front_sample-1],
                                           N_samples=N_samples, det=False))    # [..., N_samples]
             fg_depth[fg_depth<0.0002] = 0.0002
 
 
-            bg_depth_mid = bg_mid
 
             bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach()
 
             bg_weights = torch.fliplr(bg_weights)
 
-            bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
+            bg_depth,_ = torch.sort(sample_pdf(bins=bg_mid, weights=bg_weights,
                                           N_samples=N_samples, det=False))    # [..., N_samples]
 
 
@@ -942,7 +945,7 @@ def ddp_train_nerf(rank, args):
                 rgb, d, pred_fg, pred_bg, label, others  = render_single_image(models, val_ray_samplers[idx], args.chunk_size,
                                                args.train_box_only, have_box=args.have_box, donerf_pretrain=args.donerf_pretrain,
                                                front_sample=args.front_sample, back_sample=args.back_sample, fg_bg_net=args.fg_bg_net,
-                                               use_zval=args.use_zval,  loss_type=loss_type,  rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_Size)
+                                               use_zval=args.use_zval,  loss_type=loss_type,  rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_size)
 
 
             what_val_to_log += 1
@@ -1055,7 +1058,7 @@ def ddp_train_nerf(rank, args):
                                                       donerf_pretrain=args.donerf_pretrain,
                                                       front_sample=args.front_sample, back_sample=args.back_sample,
                                                       fg_bg_net=args.fg_bg_net, use_zval=args.use_zval,  loss_type=loss_type,
-                                                                             rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_Size)
+                                                                             rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_size)
 
             what_train_to_log += 1
             dt = time.time() - time0

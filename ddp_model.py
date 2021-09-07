@@ -677,6 +677,9 @@ class NerfNetMoreBox(nn.Module):
         self.box_number = args.box_number
         self.box_size = [float(size) for size in args.box_size.split(',')]
 
+        # device = torch.device(torch.cuda.current_device() if torch.cuda.is_available() else 'cpu')
+        self.box_size = torch.tensor(self.box_size).cuda().to(torch.cuda.current_device())
+
     def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only=False):
         '''orch.c
         :param ray_o, ray_d: [..., 3]
@@ -711,8 +714,7 @@ class NerfNetMoreBox(nn.Module):
 
         self.box_net = self.box_net.to(torch.cuda.current_device())
 
-        # device = torch.device(torch.cuda.current_device() if torch.cuda.is_available() else 'cpu')
-        self.box_size =  torch.tensor(self.box_size).cuda().to(torch.cuda.current_device())
+
 
         box_offset = (((fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
                       - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])))/self.box_size)  \

@@ -94,7 +94,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         nums = open(filename).read().split()
         nums = np.array([float(x) for x in nums])
 
-        nums_new = nums.reshape(box_number, 3)
+        # nums_new = nums.reshape(box_number, 3)
 
         # if norm:
         #     max = np.array([100,140])
@@ -106,17 +106,18 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         #     nums -= avg_pos
         #     nums *= 0.5
         #
-        # nums_new = np.zeros([box_number, 3])
-        # # nums_new[:2] = nums + random.randint(-20,20)/100.
-        # nums_new[:,:2] = nums
-        #
-        # # !!! CHANGE from -1 to z-normlized value
-        # z_box_scene = 1.
-        # z_cam_scene = 2.8
-        #
-        # z_box_normed = (z_box_scene - z_cam_scene) / 30.
-        #
-        # nums_new[:,2] = z_box_normed
+        nums_new = np.zeros([box_number, 3])
+        # nums_new[:2] = nums + random.randint(-20,20)/100.
+        nums = nums.reshape(box_number, 2)
+        nums_new[:,:2] = nums
+
+        # !!! CHANGE from -1 to z-normlized value
+        z_box_scene = 1.
+        z_cam_scene = 2.8
+
+        z_box_normed = (z_box_scene - z_cam_scene) / 30.
+
+        nums_new[:,2] = z_box_normed
         return nums_new.astype(np.float32)
 
     if have_box:
