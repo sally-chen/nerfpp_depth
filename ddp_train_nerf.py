@@ -297,7 +297,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
     bg_depth_mid = 0.5 * (bg_z_vals_centre[:, 1:] + bg_z_vals_centre[:, :-1])
 
     fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights[:, 1:front_sample-1],
-                          N_samples=samples, det=True))  # [..., N_samples]
+                          N_samples=samples, det=False))  # [..., N_samples]
 
 
     fg_depth = fg_depth.clone()
