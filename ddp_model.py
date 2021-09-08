@@ -651,6 +651,16 @@ class NerfNetMoreBox(nn.Module):
         self.fg_embedder_viewdir = Embedder(input_dim=3,
                                             max_freq_log2=args.max_freq_log2_viewdirs - 1,
                                             N_freqs=args.max_freq_log2_viewdirs)
+
+        self.fg_embedder_position_box = Embedder(input_dim=3,
+                                             max_freq_log2=args.max_freq_log2+5 - 1,
+                                             N_freqs=args.max_freq_log2+5)
+
+        self.fg_embedder_viewdir_box = Embedder(input_dim=3,
+                                            max_freq_log2=args.max_freq_log2_viewdirs+3 - 1,
+                                            N_freqs=args.max_freq_log2_viewdirs+3)
+
+
         self.fg_net = MLPNet(D=args.netdepth, W=args.netwidth,
                              input_ch=self.fg_embedder_position.out_dim,
                              input_ch_viewdirs=self.fg_embedder_viewdir.out_dim,
@@ -670,15 +680,17 @@ class NerfNetMoreBox(nn.Module):
 
         # input to this should be box position and sampled position
         self.box_net = MLPNet(D=4, W=args.netwidth,
-                              input_ch=self.fg_embedder_position.out_dim,
-                              input_ch_viewdirs=self.fg_embedder_viewdir.out_dim,
+                              input_ch=self.fg_embedder_position_box.out_dim,
+                              input_ch_viewdirs=self.fg_embedder_viewdir_box.out_dim,
                               use_viewdirs=args.use_viewdirs)
 
         self.box_number = args.box_number
+
         self.box_size = [float(size) for size in args.box_size.split(',')]
 
         # device = torch.device(torch.cuda.current_device() if torch.cuda.is_available() else 'cpu')
         self.box_size = torch.tensor(self.box_size).cuda().to(torch.cuda.current_device())
+
 
     def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only=False):
         '''orch.c
@@ -722,10 +734,10 @@ class NerfNetMoreBox(nn.Module):
 
         expanded_viewdir = fg_viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
         expanded_viewdir_reshape = expanded_viewdir.reshape(dots_sh[0]*self.box_number, N_samples, 3)
-        input_box = torch.cat((self.fg_embedder_position(box_offset),
-                               self.fg_embedder_viewdir(expanded_viewdir_reshape)), dim=-1)
+        input_box = torch.cat((self.fg_embedder_position_box(box_offset),
+                               self.fg_embedder_viewdir_box(expanded_viewdir_reshape)), dim=-1)
 
-        assert input_box.shape == (dots_sh[0]*self.box_number, N_samples, self.fg_embedder_position.out_dim + self.fg_embedder_viewdir.out_dim)
+        assert input_box.shape == (dots_sh[0]*self.box_number, N_samples, self.fg_embedder_position_box.out_dim + self.fg_embedder_viewdir_box.out_dim)
 
         fg_box_raw = self.box_net(input_box.float())  # (N, *)
 
