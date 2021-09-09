@@ -96,7 +96,10 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
 
         # nums_new = nums.reshape(box_number, 3)
+<<<<<<< HEAD
 
+=======
+>>>>>>> 9e039b0614c6b0d123a8fdc4fda81c5d607d1540
 
         # if norm:
         #     max = np.array([100,140])
@@ -284,7 +287,10 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       make_class_label=False))
 
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 9e039b0614c6b0d123a8fdc4fda81c5d607d1540
     # for i, p in enumerate(poses):
     #     poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
     #
@@ -311,7 +317,10 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     #     if (split == 'train'):
     #         plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
     #                        ['scene poses', 'box'])box
+<<<<<<< HEAD
 
+=======
+>>>>>>> 9e039b0614c6b0d123a8fdc4fda81c5d607d1540
 
 
 
