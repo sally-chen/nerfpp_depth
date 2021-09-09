@@ -1,8 +1,9 @@
 
 ### INPUT
 datadir = /media/diskstation/sally/data/
-scene = carla_15x15x20_6box_set2_height #big_inters_nom15_samp4x4 #carla_15x15x20_nobox_parses_seg
-expname =  box_sample192_rgb64_6box_netd4_transm25-m10 #box_sample192_rgb64_6box_transm25-m10 #
+
+scene = carla_15x15x20_6box_set2  #_height #big_inters_nom15_samp4x4 #carla_15x15x20_nobox_parses_seg
+expname = box_sample192_rgb64_6box_net4_transmsh26-m75_samp100_perturb
 basedir = /home/sally/nerf_clone/nerfpp_depth/logs
 config = None
 ckpt_path = None
@@ -22,6 +23,7 @@ cascade_samples = 64
 
 ### TESTING
 chunk_size = 4096
+
 
 ### RENDERING
 det = False
@@ -57,4 +59,6 @@ world_size=1
 train_seg = False
 
 box_number = 6
+
+box_size = 1,1,1
 

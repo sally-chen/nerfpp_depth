@@ -132,7 +132,7 @@ def sample_pdf(bins, weights, N_samples, det=False):
 
 def render_single_image(models, ray_sampler, chunk_size,
                         train_box_only=False, have_box=False,
-                        donerf_pretrain=False, box_number=10, front_sample=128, back_sample=128,
+                        donerf_pretrain=False, box_number=10, box_size=1, front_sample=128, back_sample=128,
                         fg_bg_net=True, use_zval=True,loss_type='bce',rank=0, DEBUG=True):
     """
     Render an image using the NERF.
@@ -185,7 +185,8 @@ def render_single_image(models, ray_sampler, chunk_size,
 
         chunk_ret = render_rays(models, _rays, train_box_only, have_box,
                                 donerf_pretrain, front_sample, back_sample,
-                                fg_bg_net, use_zval, loss_type, box_number=box_number)
+                                fg_bg_net, use_zval, loss_type, box_number=box_number, box_size=box_size)
+
 
         if donerf_pretrain:
             likelis_fg.append(chunk_ret['likeli_fg'])
@@ -321,7 +322,8 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
 
 
 def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
-                front_sample, back_sample, fg_bg_net, use_zval, loss_type, box_number):
+                front_sample, back_sample, fg_bg_net, use_zval, loss_type, box_number, box_size):
+
     """Render a set of rays using specific config."""
 
     # forward and backward
@@ -360,7 +362,8 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             #                              fg_z_vals=fg_z_vals_centre,
             #                              ray_d=ray_d, ray_o=ray_o, box_number=box_number)
 
-            box_weights = get_box_transmittance_weight(box_loc=box_loc, box_size=1. / 30.,
+
+            box_weights = get_box_transmittance_weight(box_loc=box_loc, box_size=box_size,
                                          fg_z_vals=fg_z_vals_centre,  ray_d=ray_d,
                                          ray_o=ray_o,
                                          fg_depth=fg_far_depth, box_number=box_number)
@@ -749,8 +752,7 @@ def ddp_train_nerf(rank, args):
 
         optim_oracle.zero_grad()
 
-        fg_mid = 0.5 * (ray_batch['fg_z_vals_centre'][:, 1:] + ray_batch['fg_z_vals_centre'][:, :-1])
-        bg_mid = 0.5 * (ray_batch['bg_z_vals_centre'][:, 1:] + ray_batch['bg_z_vals_centre'][:, :-1])
+
 
         if args.donerf_pretrain:
 
@@ -814,7 +816,15 @@ def ddp_train_nerf(rank, args):
             # sample depths
             N_samples = models['cascade_samples'][0]
 
-            fg_depth_mid = fg_mid
+
+            perturbed_seg_bound_fg = perturb_samples(ray_batch['fg_z_vals_centre']) #fg_z_vals_centre is actually the z_vals of seg bounds. pts are mid pints
+            perturbed_seg_bound_bg = perturb_samples(ray_batch['bg_z_vals_centre']) #fg_z_vals_centre is actually the z_vals of seg bounds. pts are mid pints
+
+            fg_mid = 0.5 * (perturbed_seg_bound_fg[:, 1:] + perturbed_seg_bound_fg[:, :-1])
+            bg_mid = 0.5 * (perturbed_seg_bound_bg[:, 1:] + perturbed_seg_bound_bg[:, :-1])
+
+
+
 
             # fg_weights = ray_batch['cls_label'][:,:args.front_sample]
             fg_weights = ret['likeli_fg']
@@ -844,26 +854,26 @@ def ddp_train_nerf(rank, args):
                     #                              fg_z_vals=ray_batch['fg_z_vals_centre'],
                     #                              ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'], box_number=args.box_number )
 
-                    box_weights = get_box_transmittance_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
-                                                               fg_z_vals=ray_batch['fg_z_vals_centre'], ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'],
+                    box_weights = get_box_transmittance_weight(box_loc=ray_batch['box_loc'], box_size=args.box_size,
+                                                               fg_z_vals=perturbed_seg_bound_fg, ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'],
                                                                fg_depth=ray_batch['fg_far_depth'], box_number=args.box_number)
                     box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
 
                     fg_weights = fg_weights + (box_weights)
 
 
-            fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights[:, 1:args.front_sample-1],
+
+            fg_depth,_ = torch.sort(sample_pdf(bins=fg_mid, weights=fg_weights[:, 1:args.front_sample-1],
                                           N_samples=N_samples, det=False))    # [..., N_samples]
             fg_depth[fg_depth<0.0002] = 0.0002
 
-
-            bg_depth_mid = bg_mid
 
             bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach()
 
             bg_weights = torch.fliplr(bg_weights)
 
-            bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
+
+            bg_depth,_ = torch.sort(sample_pdf(bins=bg_mid, weights=bg_weights,
                                           N_samples=N_samples, det=False))    # [..., N_samples]
 
 
@@ -942,7 +952,8 @@ def ddp_train_nerf(rank, args):
                 rgb, d, pred_fg, pred_bg, label, others  = render_single_image(models, val_ray_samplers[idx], args.chunk_size,
                                                args.train_box_only, have_box=args.have_box, donerf_pretrain=args.donerf_pretrain,
                                                front_sample=args.front_sample, back_sample=args.back_sample, fg_bg_net=args.fg_bg_net,
-                                               use_zval=args.use_zval,  loss_type=loss_type,  rank=rank, DEBUG=True, box_number=args.box_number)
+                                               use_zval=args.use_zval,  loss_type=loss_type,  rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_size)
+
 
 
             what_val_to_log += 1
@@ -1055,7 +1066,8 @@ def ddp_train_nerf(rank, args):
                                                       donerf_pretrain=args.donerf_pretrain,
                                                       front_sample=args.front_sample, back_sample=args.back_sample,
                                                       fg_bg_net=args.fg_bg_net, use_zval=args.use_zval,  loss_type=loss_type,
-                                                                             rank=rank, DEBUG=True, box_number=args.box_number)
+                                                                             rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_size)
+
 
             what_train_to_log += 1
             dt = time.time() - time0
@@ -1290,6 +1302,11 @@ def config_parser():
 
     parser.add_argument("--box_number", type=int, default=10,
                         help='number of box in the scene')
+
+
+    parser.add_argument("--box_size", type=str, default='1,1,1',
+                        help='size of box in the scene')
+
 
     return parser
 
