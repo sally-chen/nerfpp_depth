@@ -11,7 +11,7 @@ testskip = 1
 
 ### TRAINING
 N_iters = 1000001
-N_rand = 1024
+N_rand = 512
 lrate = 0.0005
 lrate_decay_factor = 0.1
 lrate_decay_steps = 5000
@@ -21,7 +21,8 @@ cascade_level = 1
 cascade_samples = 64
 
 ### TESTING
-chunk_size = 2048
+
+chunk_size = 4096
 
 ### RENDERING
 det = False
@@ -56,5 +57,5 @@ world_size=1
 
 train_seg = False
 
-box_number = 3
-
+box_number = 6
+box_size = 1,1,1
