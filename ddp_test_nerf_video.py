@@ -130,7 +130,7 @@ def ddp_test_nerf(rank, args):
                                                                           back_sample=args.back_sample,
                                                                           fg_bg_net=args.fg_bg_net,
                                                                           use_zval=args.use_zval, loss_type='bce', box_number=args.box_number, box_size=args.box_size,
-                                                                          rank=rank, DEBUG=False)
+                                                                          rank=rank, DEBUG=True)
 
 
             dt = time.time() - time0
@@ -181,10 +181,15 @@ def ddp_test_nerf(rank, args):
             im = to8b(im)
             imageio.imwrite(os.path.join(out_dir, 'depth_' + fname), im)
 
-                # im = ret[-1]['bg_depth'].numpy()
-                # im = colorize_np(im, cmap_name='jet', append_cbar=True)
-                # im = to8b(im)
-                # imageio.imwrite(os.path.join(out_dir, 'bg_depth_' + fname), im)
+            im = others['d_lam'].cpu().numpy()
+            im = colorize_np(im, cmap_name='jet', append_cbar=True)
+            # im = to8b(im)
+            imageio.imwrite(os.path.join(out_dir, 'box_weights' + fname), im)
+
+            im = others['d_fg'].cpu().numpy()
+            im = colorize_np(im, cmap_name='jet', append_cbar=True)
+            # im = to8b(im)
+            imageio.imwrite(os.path.join(out_dir, 'scene_weights' + fname), im)
 
             torch.cuda.empty_cache()
 
