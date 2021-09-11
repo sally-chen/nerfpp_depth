@@ -1,8 +1,8 @@
 import os
 
 os.environ['CUDA_DEVICE_ORDER']= 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES']= '2'
->>>>>>> e3bb4a8f4da11e60da64be0ac812ed04fd3071c9
+os.environ['CUDA_VISIBLE_DEVICES']= '0'
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -1334,20 +1334,12 @@ def config_parser():
     parser.add_argument("--box_number", type=int, default=1,
                         help='number of box in the scene')
 
-<<<<<<< HEAD
-
-
-    parser.add_argument("--box_size", type=str, default='1,1,1',
-                        help='size of box in the scene')
-
-=======
 
 
     parser.add_argument("--box_size", type=str, default='1,1,1',
                         help='size of box in the scene')
 
 
->>>>>>> e3bb4a8f4da11e60da64be0ac812ed04fd3071c9
     return parser
 
 
