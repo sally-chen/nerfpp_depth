@@ -1,6 +1,8 @@
 import os
+
 os.environ['CUDA_DEVICE_ORDER']= 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES']= '0'
+os.environ['CUDA_VISIBLE_DEVICES']= '2'
+>>>>>>> e3bb4a8f4da11e60da64be0ac812ed04fd3071c9
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -362,6 +364,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             #                              box_size=1. / 30.,
             #                              fg_z_vals=fg_z_vals_centre,
             #                              ray_d=ray_d, ray_o=ray_o, box_number=box_number)
+
 
 
             box_weights = get_box_transmittance_weight(box_loc=box_loc, box_size=box_size,
@@ -766,6 +769,7 @@ def ddp_train_nerf(rank, args):
         optim_oracle.zero_grad()
 
 
+
         if args.donerf_pretrain:
 
             if args.have_box:
@@ -837,6 +841,7 @@ def ddp_train_nerf(rank, args):
 
 
 
+
             # fg_weights = ray_batch['cls_label'][:,:args.front_sample]
             fg_weights = ret['likeli_fg']
 
@@ -865,6 +870,7 @@ def ddp_train_nerf(rank, args):
                     #                              fg_z_vals=ray_batch['fg_z_vals_centre'],
                     #                              ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'], box_number=args.box_number )
 
+
                     box_weights = get_box_transmittance_weight(box_loc=ray_batch['box_loc'], box_size=args.box_size,
                                                                fg_z_vals=perturbed_seg_bound_fg, ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'],
 
@@ -875,17 +881,13 @@ def ddp_train_nerf(rank, args):
 
 
 
-
             fg_depth,_ = torch.sort(sample_pdf(bins=fg_mid, weights=fg_weights[:, 1:args.front_sample-1],
-
                                           N_samples=N_samples, det=False))    # [..., N_samples]
             fg_depth[fg_depth<0.0002] = 0.0002
-
 
             bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach()
 
             bg_weights = torch.fliplr(bg_weights)
-
 
             bg_depth,_ = torch.sort(sample_pdf(bins=bg_mid, weights=bg_weights,
                                           N_samples=N_samples, det=False))    # [..., N_samples]
@@ -978,6 +980,8 @@ def ddp_train_nerf(rank, args):
                                                args.train_box_only, have_box=args.have_box, donerf_pretrain=args.donerf_pretrain,
                                                front_sample=args.front_sample, back_sample=args.back_sample, fg_bg_net=args.fg_bg_net,
                                                use_zval=args.use_zval,  loss_type=loss_type,  rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_size)
+
+
 
 
             what_val_to_log += 1
@@ -1091,7 +1095,6 @@ def ddp_train_nerf(rank, args):
                                                       front_sample=args.front_sample, back_sample=args.back_sample,
                                                       fg_bg_net=args.fg_bg_net, use_zval=args.use_zval,  loss_type=loss_type,
                                                        rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_size)
-
 
             what_train_to_log += 1
             dt = time.time() - time0
@@ -1213,6 +1216,7 @@ def ddp_train_nerf(rank, args):
             torch.cuda.empty_cache()
 
         if (global_step % args.i_weights == 0 and global_step > 0):
+        
             # saving checkpoints and logging
             fpath = os.path.join(args.basedir, args.expname, 'model_{:06d}.pth'.format(global_step))
             to_save = OrderedDict()
@@ -1330,12 +1334,20 @@ def config_parser():
     parser.add_argument("--box_number", type=int, default=1,
                         help='number of box in the scene')
 
+<<<<<<< HEAD
+
+
+    parser.add_argument("--box_size", type=str, default='1,1,1',
+                        help='size of box in the scene')
+
+=======
 
 
     parser.add_argument("--box_size", type=str, default='1,1,1',
                         help='size of box in the scene')
 
 
+>>>>>>> e3bb4a8f4da11e60da64be0ac812ed04fd3071c9
     return parser
 
 

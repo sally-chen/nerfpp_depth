@@ -83,9 +83,6 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     logger.info('raw intrinsics_files: {}'.format(len(intrinsics_files)))
     logger.info('raw pose_files: {}'.format(len(pose_files)))
 
-
-
-
     intrinsics_files = intrinsics_files[::skip]
     pose_files = pose_files[::skip]
     cam_cnt = len(pose_files)
@@ -94,8 +91,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         nums = open(filename).read().split()
         nums = np.array([float(x) for x in nums])
 
-
-        # nums_new = nums.reshape(box_number, 3)
+        #nums_new = nums.reshape(box_number, 3)
 
 
         # if norm:
@@ -109,6 +105,19 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         #     nums *= 0.5
         #
 
+        # nums_new = np.zeros([box_number, 3])
+        # # nums_new[:2] = nums + random.randint(-20,20)/100.
+        # nums_new[:,:2] = nums
+        #
+        # # !!! CHANGE from -1 to z-normlized value
+        # z_box_scene = 1.
+        # z_cam_scene = 2.8
+        #
+        # z_box_normed = (z_box_scene - z_cam_scene) / 30.
+        #
+        # nums_new[:,2] = z_box_normed
+
+
         nums_new = np.zeros([box_number, 3])
         # nums_new[:2] = nums + random.randint(-20,20)/100.
         nums = nums.reshape(box_number, 2)
@@ -121,6 +130,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         z_box_normed = (z_box_scene - z_cam_scene) / 30.
 
         nums_new[:,2] = z_box_normed
+
 
         return nums_new.astype(np.float32)
 
@@ -284,7 +294,29 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       max_depth=max_depth, depth_path=depth_files[i],
                                                       make_class_label=False))
 
+#
 
+ #   for i, p in enumerate(poses):
+ #       poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
+ #
+ #       if have_box:
+ #           locs[i][:,:2] = (locs[i][:,:2] / 0.5 + avg_pose) * (max - min) + min
+ #   if not have_box:
+ #       plot_mult_pose([np.stack(poses, axis=0)], 'input poses nerf ++',
+ #                   ['scene poses'])
+    #
+ #   else:
+        # dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))
+        # locs = np.stack(locs, axis=0)
+        # dummy_pose_loc[:,:3, 3] = locs
+        # plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses {} nerf ++'.format(split),
+        #                ['scene poses','box'])
+
+ #       locs = np.stack(locs, axis=0)  # (N, 30)
+
+
+ #       dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape[0]*6,3,4))
+ #       dummy_pose_loc[:, :3, 3] = np.reshape(locs, (np.stack(poses, axis=0).shape[0]*6,3))
 
 
     # for i, p in enumerate(poses):
@@ -313,6 +345,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     #     if (split == 'train'):
     #         plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
     #                        ['scene poses', 'box'])box
+
 
 
 

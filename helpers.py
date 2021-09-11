@@ -269,8 +269,10 @@ def triangle_filter( occupancy, Z=5):
 def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_depth,box_number=10):
 
 
+
     sizes = [float(size) for size in box_size.split(',')]
     assert len(sizes) == 3
+
 
     # pts: N x 128 x 3
     # assume axis aligned box
@@ -290,6 +292,8 @@ def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_
     fg_pts = fg_pts.unsqueeze(-2).expand(N_rays + [N_samples, box_number, 3])
 
     # box_loc[:,2] = -1.#-1.8/60.
+
+    # box_size = torch.Tensor([[1/20.,1/20.,3.]]).to(torch.cuda.current_device
 
     # box_size = torch.Tensor([[1/20.,1/20.,3.]]).to(torch.cuda.current_device())
 
