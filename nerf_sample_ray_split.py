@@ -233,7 +233,7 @@ class RaySamplerSingleImage(object):
 
                 if self.box_loc is not None:
                     self.box_seg = np.zeros(seg_map.shape)
-                    self.box_seg[seg_map==5] = 1
+                    self.box_seg[seg_map==3] = 1
 
                 if self.train_seg:
                     self.pole_inds = (seg_map == 3).nonzero()[0] #5 is pole 3 is box
@@ -314,6 +314,12 @@ class RaySamplerSingleImage(object):
     def get_depth(self):
         if self.depth_map_nonorm is not None:
             return self.depth_map_nonorm.reshape((self.H, self.W))
+        else:
+            return None
+
+    def get_box_mask(self):
+        if self.box_seg is not None:
+            return self.box_seg.reshape((self.H, self.W))
         else:
             return None
 

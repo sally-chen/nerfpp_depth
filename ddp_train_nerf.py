@@ -415,7 +415,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
         return ret
 
-def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask, gt_depth=None, train_box_only= False, have_box=False, prefix='', DEBUG=False, others=None):
+def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask, gt_depth=None, train_box_only= False, have_box=False, box_seg_mask=None, prefix='', DEBUG=False, others=None):
     rgb_im = img_HWC2CHW(torch.from_numpy(gt_img))
     writer.add_image(prefix + 'rgb_gt', rgb_im, global_step)
 
@@ -428,6 +428,11 @@ def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask
         gt_depth[gt_depth > depth_clip] = depth_clip  ##### THIS IS THE DEPTH OUTPUT, HxW, value is meters away from camera centre
         depth_im = img_HWC2CHW(colorize(gt_depth, cmap_name='jet', append_cbar=True, mask=mask, is_np=True))
         writer.add_image(prefix + 'depth_gt', depth_im, global_step)
+
+    if box_seg_mask is not None:
+
+        box_seg_mask_im = img_HWC2CHW(colorize(box_seg_mask, cmap_name='jet', append_cbar=True, mask=mask, is_np=True))
+        writer.add_image(prefix + 'level_{}/boxsegmask_gt'.format(0), box_seg_mask_im, global_step)
 
 
     rgb_im = img_HWC2CHW(rgb_predict)
@@ -459,7 +464,7 @@ def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask
         writer.add_image(prefix + 'level_{}/bg_depth'.format(0), depth_im, global_step)
 
         bg_lambda = others['d_lam']
-        bg_lambda_im = img_HWC2CHW(colorize(bg_lambda, cmap_name='hot', append_cbar=True,
+        bg_lambda_im = img_HWC2CHW(colorize(bg_lambda, cmap_name='jet', append_cbar=True,
                                             mask=mask))
         writer.add_image(prefix + 'level_{}/bg_lambda'.format(0), bg_lambda_im, global_step)
 
@@ -1054,7 +1059,7 @@ def ddp_train_nerf(rank, args):
                 # label_fg = label[:, :args.front_sample]
                 # label_bg = label[:, args.front_sample:]
                 #if args.depth_training:
-                log_view_to_tb(writer, global_step, rgb,d , gt_depth=val_ray_samplers[idx].get_depth(),
+                log_view_to_tb(writer, global_step, rgb,d , gt_depth=val_ray_samplers[idx].get_depth(), box_seg_mask=val_ray_samplers[idx].get_box_mask(),
                                gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
                                train_box_only=args.train_box_only, prefix='val/',DEBUG=True, others=others)
 
@@ -1179,7 +1184,7 @@ def ddp_train_nerf(rank, args):
                 # label_bg = label[:, args.front_sample:]
 
                 # if args.depth_training:
-                log_view_to_tb(writer, global_step, rgb,d, gt_depth=ray_samplers[idx].get_depth(),
+                log_view_to_tb(writer, global_step, rgb,d, gt_depth=ray_samplers[idx].get_depth(), box_seg_mask=ray_samplers[idx].get_box_mask(),
                                gt_img=ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
                                train_box_only=args.train_box_only, prefix='train/', DEBUG=True, others=others)
 
