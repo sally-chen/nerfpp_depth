@@ -653,12 +653,12 @@ class NerfNetMoreBox(nn.Module):
                                             N_freqs=args.max_freq_log2_viewdirs)
 
         self.fg_embedder_position_box = Embedder(input_dim=3,
-                                             max_freq_log2=args.max_freq_log2-4 - 1,
-                                             N_freqs=args.max_freq_log2-4)
+                                             max_freq_log2=args.max_freq_log2 - 1,
+                                             N_freqs=args.max_freq_log2)
 
         self.fg_embedder_viewdir_box = Embedder(input_dim=3,
-                                            max_freq_log2=args.max_freq_log2_viewdirs-1 - 1,
-                                            N_freqs=args.max_freq_log2_viewdirs-1)
+                                            max_freq_log2=args.max_freq_log2_viewdirs - 1,
+                                            N_freqs=args.max_freq_log2_viewdirs)
 
 
         self.fg_net = MLPNet(D=args.netdepth, W=args.netwidth,
@@ -745,7 +745,7 @@ class NerfNetMoreBox(nn.Module):
 
         def filter_sigma(fg_box_raw_sigma_, box_loc, fg_z_vals, fg_pts):
 
-            box_size = torch.Tensor([[1 / 25., 1 / 25., 1 / 25.]]).type_as(box_loc).unsqueeze(0).expand(
+            box_size = torch.Tensor([[1 / 26., 1 / 26., 1 / 26.]]).type_as(box_loc).unsqueeze(0).expand(
                 dots_sh + [self.box_number, 3])
 
             assert box_size.shape == (dots_sh[0], self.box_number, 3)
@@ -763,10 +763,10 @@ class NerfNetMoreBox(nn.Module):
             in_boxes_compare = torch.gt(fg_pts_, mins) & torch.lt(fg_pts_, maxs)  # N, N_samples, N_b,
             in_boxes = torch.sum(in_boxes_compare, dim=-1) == 3  # N, N_samples, N_b,
 
-            if torch.sum(torch.sum(in_boxes, dim=-1)) > 0:
-
-                test = fg_box_raw_sigma_.cpu().numpy()
-                test_inb = in_boxes.cpu().numpy()
+            # if torch.sum(torch.sum(in_boxes, dim=-1)) > 0:
+            #
+            #     test = fg_box_raw_sigma_.cpu().numpy()
+            #     test_inb = in_boxes.cpu().numpy()
 
 
             box_occupancy = torch.zeros(fg_box_raw_sigma_.shape).type_as(box_loc)  # N, 127
@@ -778,7 +778,7 @@ class NerfNetMoreBox(nn.Module):
             return box_occupancy
 
 
-        fg_box_raw_sigma = fg_box_raw_sigma__#filter_sigma(fg_box_raw_sigma__, box_loc, fg_z_vals, fg_pts)
+        fg_box_raw_sigma = filter_sigma(fg_box_raw_sigma__, box_loc, fg_z_vals, fg_pts)
 
         #test = fg_box_raw_sigma.cpu().numpy()
         #test_rgb = fg_box_raw_rgb.cpu().numpy()
@@ -799,21 +799,54 @@ class NerfNetMoreBox(nn.Module):
         # account for view directions
         fg_dists = ray_d_norm * torch.cat((fg_dists, fg_z_max.unsqueeze(-1) - fg_z_vals[..., -1:]),
                                           dim=-1)  # [..., N_samples]
-        fg_alpha = 1. - torch.exp(-(fg_raw['sigma'] + torch.sum(fg_box_raw_sigma, dim=1)) * fg_dists)  # [..., N_samples]
+
+        # fg_alpha = 1. - torch.exp(-(fg_raw['sigma'] + torch.sum(fg_box_raw_sigma, dim=1)) * fg_dists)  # [..., N_samples]
+        fg_dists_box = fg_dists.unsqueeze(1).expand(dots_sh+[self.box_number, N_samples])
+        fg_alpha_box_samples = 1. - torch.exp(-fg_box_raw_sigma * fg_dists_box)
+
+        fg_alpha_box = torch.sum(fg_alpha_box_samples, dim=1)  # [..., N_samples]
+        fg_alpha_scene = 1. - torch.exp(-fg_raw['sigma'] * fg_dists)    # [..., N_samples]
+        fg_alpha = fg_alpha_scene + fg_alpha_box
         T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)  # [..., N_samples]
         bg_lambda = T[..., -1]
         T = torch.cat((torch.ones_like(T[..., 0:1]), T[..., :-1]), dim=-1)  # [..., N_samples]
         fg_weights = fg_alpha * T  # [..., N_samples]
 
 
-        fg_rgb = torch.div(torch.sum(fg_box_raw_sigma.unsqueeze(-1) * fg_box_raw_rgb, dim=1)
-                  + fg_raw['sigma'].unsqueeze(-1) * fg_raw['rgb'],
-                  fg_raw['sigma'].unsqueeze(-1) + torch.sum(fg_box_raw_sigma, dim=1).unsqueeze(-1))
-        # fg_rgb = torch.div(
-        #     sum(fg_box_raw_lst[i]['sigma'].unsqueeze(-1) * fg_box_raw_lst[i]['rgb'] for i in range(self.box_number)) + fg_raw[
-        #         'sigma'].unsqueeze(-1) * fg_raw['rgb'],
-        #     (sum(fg_box_raw_lst[i]['sigma'] for i in range(self.box_number)) + fg_raw['sigma']).unsqueeze(-1)
-        # )
+        T_boxes = torch.cumprod(1. - fg_alpha_box_samples + TINY_NUMBER, dim=-1)
+        T_boxes = torch.cat((torch.ones_like(T_boxes[..., 0:1]), T_boxes[..., :-1]), dim=-1)
+
+        T_scene = torch.cumprod(1. - fg_alpha_scene + TINY_NUMBER, dim=-1)
+        T_scene = torch.cat((torch.ones_like(T_scene[..., 0:1]), T_scene[..., :-1]), dim=-1)
+
+        fg_weights_boxes = fg_alpha_box_samples  * T_boxes
+        fg_weights_scene = fg_alpha_scene * T_scene
+
+        fg_rgb = torch.div(torch.sum(fg_weights_boxes.unsqueeze(-1) * fg_box_raw_rgb , dim=1)
+                  + fg_weights_scene.unsqueeze(-1) * fg_raw['rgb'] + TINY_NUMBER,
+                  fg_weights_scene.unsqueeze(-1) + torch.sum(fg_weights_boxes, dim=1).unsqueeze(-1) + TINY_NUMBER)
+
+        # fg_rgb_test = fg_rgb.cpu().numpy()
+
+
+
+        # fg_rgb = torch.sum(fg_weights_boxes.unsqueeze(-1) * fg_box_raw_rgb , dim=1) + fg_weights_scene.unsqueeze(-1) * fg_raw['rgb'] + TINY_NUMBER
+        # #           + fg_weights_scene.unsqueeze(-1) * fg_raw['rgb'] + TINY_NUMBER
+
+
+
+
+        # fg_rgb = torch.div(torch.sum(fg_box_raw_sigma.unsqueeze(-1) * fg_box_raw_rgb, dim=1)
+        #           + fg_raw['sigma'].unsqueeze(-1) * fg_raw['rgb'],
+        #           fg_raw['sigma'].unsqueeze(-1) + torch.sum(fg_box_raw_sigma, dim=1).unsqueeze(-1))
+
+
+        # fg_rgb = torch.div(torch.sum(fg_alpha_box_samples.unsqueeze(-1) * fg_box_raw_rgb, dim=1)
+        #           + fg_alpha_scene.unsqueeze(-1) * fg_raw['rgb'],
+        #           fg_alpha_scene.unsqueeze(-1) + torch.sum(fg_alpha_box_samples, dim=1).unsqueeze(-1))
+
+
+
 
         N, d = fg_raw['sigma'].shape[0], fg_raw['sigma'].shape[1]
         assert fg_rgb.shape == (N, d, 3)
@@ -888,6 +921,7 @@ class NerfNetMoreBox(nn.Module):
                            ('bg_rgb', bg_rgb_map),
                            ('bg_depth', bg_depth_map*30.),
                            ('bg_lambda', bg_lambda),
+                           ('box_weights', torch.sum(torch.sum(fg_weights_boxes , dim=1), dim=-1)),
                            ('depth_fgbg', depth_map*30.)])
         return ret
 

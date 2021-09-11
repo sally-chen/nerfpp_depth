@@ -129,7 +129,8 @@ class RaySamplerSingleImage(object):
                  seg_path=None,
                  make_class_label=None,
                  train_box_only=False,
-                 lidar_scan=False
+                 lidar_scan=False,
+                 train_seg=False
                  ):
         super().__init__()
 
@@ -149,10 +150,10 @@ class RaySamplerSingleImage(object):
 
         self.resolution_level = -1
         self.lidar_scan = lidar_scan
-        self.set_resolution_level(resolution_level, rays=rays)
 
         self.box_loc = box_loc
-
+        self.train_seg = train_seg
+        self.set_resolution_level(resolution_level, rays=rays)
         if img_path is not None:
             number = self.img_path[-9:-4]
             self.label_path = self.img_path[:-13] + '/cube_scene_filt9_z5/' + number
@@ -229,10 +230,16 @@ class RaySamplerSingleImage(object):
             self.pole_inds = None
             if self.seg_path is not None:
                 seg_map = np.array(imageio.imread(self.seg_path)[..., 0]).reshape(-1)
-                self.pole_inds = (seg_map == 3).nonzero()[0] #5 is pole 3 is box
-                print('seg inds length {}'.format(self.pole_inds.shape[0]))
-                if self.pole_inds.shape[0] == 0:
-                    self.pole_inds = None
+
+                if self.box_loc is not None:
+                    self.box_seg = np.zeros(seg_map.shape)
+                    self.box_seg[seg_map==5] = 1
+
+                if self.train_seg:
+                    self.pole_inds = (seg_map == 3).nonzero()[0] #5 is pole 3 is box
+                    print('seg inds length {}'.format(self.pole_inds.shape[0]))
+                    if self.pole_inds.shape[0] == 0:
+                        self.pole_inds = None
 
             if self.depth_path is not None:
 
@@ -899,6 +906,7 @@ class RaySamplerSingleImage(object):
 
         rays_o = self.rays_o[select_inds, :]  # [N_rand, 3]
         rays_d = self.rays_d[select_inds, :]  # [N_rand, 3]
+        seg_map_box = self.box_seg[select_inds]
 
         fg_pts_flat = fg_pts_flat[select_inds]
         fg_z_vals_centre = fg_z_vals_centre[select_inds]
@@ -957,6 +965,7 @@ class RaySamplerSingleImage(object):
             ('mask', mask),
             ('min_depth', min_depth),
             ('img_name', self.img_path),
+            ('seg_map_box', seg_map_box),
             ('box_loc', box_loc)
 
         ])

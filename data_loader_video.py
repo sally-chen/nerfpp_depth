@@ -35,7 +35,7 @@ def gen_box_locs(count=55, box_number=10):
     ct2 = 20
     np.random.seed(123)
     loc1 = np.concatenate((np.random.uniform(81., 89., (ct1, box_number, 1)),
-                          np.random.uniform(120., 130., (ct1,box_number, 1))), axis=-1)
+                          np.random.uniform(110., 120., (ct1,box_number, 1))), axis=-1)
 
     loc2 = np.concatenate((np.random.uniform(90., 98., (ct2, box_number, 1)),
                           np.random.uniform(111., 118., (ct2, box_number,1))), axis=-1)

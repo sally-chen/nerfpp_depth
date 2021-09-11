@@ -93,6 +93,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
         #nums_new = nums.reshape(box_number, 3)
 
+
         # if norm:
         #     max = np.array([100,140])
         #     min = np.array([85, 125])
@@ -217,8 +218,8 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     locs = []
 
     # tmp ##
-    # if cam_cnt > 50:
-    #     cam_cnt = 50
+    if cam_cnt > 50:
+        cam_cnt = 50
 
     ## tmp ##
 
@@ -280,7 +281,8 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
                                                       min_depth_path=mindepth_files[i],
                                                       max_depth=max_depth, box_loc=loc,
                                                       depth_path=depth_files[i],
-                                                      seg_path = None, #seg_files[i],
+                                                      seg_path = seg_files[i],
+                                                      train_seg = False,
                                                     make_class_label=False))
 
         else:
@@ -317,11 +319,6 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
  #       dummy_pose_loc[:, :3, 3] = np.reshape(locs, (np.stack(poses, axis=0).shape[0]*6,3))
 
 
- #       if (split == 'train'):
- #           plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
- #                          ['scene poses', 'box'])
-
-
     # for i, p in enumerate(poses):
     #     poses[i][:2, 3] = (p[:2,3] / 0.5 + avg_pose) * (max - min) + min
     #
@@ -348,6 +345,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     #     if (split == 'train'):
     #         plot_mult_pose([np.stack(poses, axis=0), dummy_pose_loc], 'input poses nerf ++',
     #                        ['scene poses', 'box'])box
+
 
 
 
