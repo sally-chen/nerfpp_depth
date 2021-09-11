@@ -130,10 +130,15 @@ def ddp_test_nerf(rank, args):
                                                                           back_sample=args.back_sample,
                                                                           fg_bg_net=args.fg_bg_net,
 <<<<<<< HEAD
+<<<<<<< HEAD
                                                                           use_zval=args.use_zval, loss_type='bce', box_number=args.box_number,
 =======
                                                                           use_zval=args.use_zval, loss_type='bce', box_number=args.box_number, box_size=args.box_size,
 >>>>>>> de5a545ed803c0f4ee52ccc90a85a5ea05d48f71
+=======
+                                                                          use_zval=args.use_zval, loss_type='bce', box_number=args.box_number, box_size=args.box_size,
+
+>>>>>>> 9e039b0614c6b0d123a8fdc4fda81c5d607d1540
                                                                           rank=rank, DEBUG=False)
 
 

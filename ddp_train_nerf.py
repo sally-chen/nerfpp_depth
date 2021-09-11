@@ -1,7 +1,8 @@
 import os
 
-os.environ['CUDA_DEVICE_ORDER']='PCI_BUS_ID'
+os.environ['CUDA_DEVICE_ORDER']= 'PCI_BUS_ID'
 os.environ['CUDA_VISIBLE_DEVICES']= '2'
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -365,6 +366,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             #                              ray_d=ray_d, ray_o=ray_o, box_number=box_number)
 
 
+
             box_weights = get_box_transmittance_weight(box_loc=box_loc, box_size=box_size,
                                          fg_z_vals=fg_z_vals_centre,  ray_d=ray_d,
                                          ray_o=ray_o,
@@ -488,12 +490,15 @@ def create_nerf(rank, args):
         optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
         models['optim_oracle'] = optim
         net = NerfNetMoreBoxWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+
+        netscene = WrapperModule(NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank))
     else:
         ora_net = DepthOracle(args).to(rank)
         models['net_oracle'] = WrapperModule(ora_net)
         optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
         models['optim_oracle'] = optim
         net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+
 
     optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
     models['net_0'] = WrapperModule(net)
@@ -660,9 +665,18 @@ def create_nerf(rank, args):
 
         # for load weights without box
 
-        model_dict_old = models['net_0'].state_dict()
-        model_dict = {k: v  for k,v in to_load_dep['net_0'].items() if k in model_dict_old}
-        models['net_0'].load_state_dict(model_dict)
+        model_dict_old = netscene.state_dict()
+        model_dict_new = models['net_0'].state_dict()
+
+        for k in model_dict_old.keys():
+            model_dict_new[k] = to_load_dep['net_0'][k]
+
+
+        # model_dict = {k: v  for k,v in to_load_dep['net_0'].items() if k in model_dict_old  }
+        #
+        # print(model_dict_old)
+
+        models['net_0'].load_state_dict(model_dict_new)
 
         ## ---------------new--------------- ##
 
@@ -859,6 +873,7 @@ def ddp_train_nerf(rank, args):
 
                     box_weights = get_box_transmittance_weight(box_loc=ray_batch['box_loc'], box_size=args.box_size,
                                                                fg_z_vals=perturbed_seg_bound_fg, ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'],
+
                                                                fg_depth=ray_batch['fg_far_depth'], box_number=args.box_number)
                     box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
 
@@ -871,13 +886,9 @@ def ddp_train_nerf(rank, args):
                                           N_samples=N_samples, det=False))    # [..., N_samples]
             fg_depth[fg_depth<0.0002] = 0.0002
 
-
-
-
             bg_weights = torch.sigmoid(ret['likeli_bg'])[:, 1: args.back_sample-1].clone().detach()
 
             bg_weights = torch.fliplr(bg_weights)
-
 
             bg_depth,_ = torch.sort(sample_pdf(bins=bg_mid, weights=bg_weights,
                                           N_samples=N_samples, det=False))    # [..., N_samples]
@@ -959,6 +970,7 @@ def ddp_train_nerf(rank, args):
                                                args.train_box_only, have_box=args.have_box, donerf_pretrain=args.donerf_pretrain,
                                                front_sample=args.front_sample, back_sample=args.back_sample, fg_bg_net=args.fg_bg_net,
                                                use_zval=args.use_zval,  loss_type=loss_type,  rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_size)
+
 
 
 
@@ -1072,8 +1084,7 @@ def ddp_train_nerf(rank, args):
                                                       donerf_pretrain=args.donerf_pretrain,
                                                       front_sample=args.front_sample, back_sample=args.back_sample,
                                                       fg_bg_net=args.fg_bg_net, use_zval=args.use_zval,  loss_type=loss_type,
-                                                                             rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_size)
-
+                                                       rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_size)
 
             what_train_to_log += 1
             dt = time.time() - time0
@@ -1311,8 +1322,10 @@ def config_parser():
                         help='number of box in the scene')
 
 
+
     parser.add_argument("--box_size", type=str, default='1,1,1',
                         help='size of box in the scene')
+
     return parser
 
 
