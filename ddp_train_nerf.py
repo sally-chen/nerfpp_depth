@@ -1,6 +1,6 @@
 import os
 os.environ['CUDA_DEVICE_ORDER']= 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES']= '1'
+os.environ['CUDA_VISIBLE_DEVICES']= '0'
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -207,7 +207,7 @@ def render_single_image(models, ray_sampler, chunk_size,
 
                 rgbs_bg.append(chunk_ret['bg_rgb'])
                 depths_bg.append(chunk_ret['bg_depth'])
-                depths_lamda.append(chunk_ret['bg_lambda'])
+                depths_lamda.append(chunk_ret['box_weights'])
 
 
     if donerf_pretrain:
@@ -538,11 +538,9 @@ def create_nerf(rank, args):
         map_location = 'cuda:%d' % rank
 
         to_load = torch.load(fpath, map_location=map_location)
-        #
+
         models['optim_oracle'].load_state_dict(to_load['optim_oracle'])
         models['net_oracle'].load_state_dict(to_load['net_oracle'])
-        #
-
 
         ###########################33 before donerf use random weights for nerf ##########
         for m in range(models['cascade_level']):
@@ -629,6 +627,7 @@ def create_nerf(rank, args):
         fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/box_sample192_rgb64_boxcorrect/model_725000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/scene_nobox_set2_fr192_K9Z5//model_575000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle/model_995000.pth"
+        fpath_depth_scene = "/home/sally/nerf_clone/nerfpp_depth/logs/scene_nobox_set2_fr192_K9Z5//model_970000.pth"
 
 
         # models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
@@ -638,10 +637,11 @@ def create_nerf(rank, args):
         # to_load_box = torch.load(fpath_box, map_location=map_location)
         to_load_comb = torch.load(fpath_comb, map_location=map_location)
         to_load_dep = torch.load(fpath_depth_ora, map_location=map_location)
+        to_load_sc_ora = torch.load(fpath_depth_scene, map_location=map_location)
 
 
-        models['optim_oracle'].load_state_dict(to_load_dep['optim_oracle'])
-        models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
+        models['optim_oracle'].load_state_dict(to_load_sc_ora['optim_oracle'])
+        models['net_oracle'].load_state_dict(to_load_sc_ora['net_oracle'])
 
 
 
@@ -903,24 +903,35 @@ def ddp_train_nerf(rank, args):
 
             rgb_gt = ray_batch['rgb'].to(rank)
             rgb_loss = img2mse(ret['rgb'], rgb_gt)
+            loss = rgb_loss
+
             if args.depth_training:
                 depth_gt = ray_batch['depth_gt'].to(rank)
                 depth_pred = ret['depth_fgbg']
-                #mask =  torch.tensor(0. * np.ones(depth_pred.shape).astype(np.float32)).cuda()
+
                 inds = torch.where(depth_gt < 2001.)
                 d_pred_map = depth_pred[inds]
                 d_gt_map = depth_gt[inds]
 
                 depth_loss = dep_l1l2loss(torch.div(1.,d_pred_map), torch.div(1.,d_gt_map), l1l2 = 'l1')
                 #reg_loss = dep_l1l2loss(torch.div(1.,d_pred_map[:512])-torch.div(1.,d_pred_map[512:]), torch.div(1.,d_gt_map[:512])-torch.div(1.,d_gt_map[512:]), l1l2 = 'l1')
-                loss = rgb_loss  +  0.1 * depth_loss
-                #scalars_to_log['level_{}/reg_loss'.format(m)] = reg_loss.item()
-
+                loss += 0.1 * depth_loss
                 #loss = rgb_loss * 0 +  depth_loss
                 scalars_to_log['level_0/depth_loss'] = depth_loss.item()
 
-            else:
-                loss = rgb_loss
+
+            if args.seg_box_loss:
+                seg_box_gt = ray_batch['seg_map_box']
+                seg_prediction = ret['box_weights']
+                seg_box_loss =  dep_l1l2loss(seg_prediction, seg_box_gt, l1l2 = 'l2')
+                loss += seg_box_loss
+                scalars_to_log['level_0/seg_box_loss'] = seg_box_loss.item()
+
+
+
+
+
+
 
             # print(global_step)
             scalars_to_log['level_0/rgb_loss'] = rgb_loss.item()
@@ -1310,10 +1321,13 @@ def config_parser():
     parser.add_argument("--train_seg", action='store_true',
                         help='use segmentation mask to prioritize training')
 
+    parser.add_argument("--seg_box_loss", action='store_true',
+                        help='add segmentation box loss')
+
     parser.add_argument("--max_freq_log2_pts", type=int, default=3,
                         help='log2 of max freq for positional encoding (seg points)')
 
-    parser.add_argument("--box_number", type=int, default=10,
+    parser.add_argument("--box_number", type=int, default=1,
                         help='number of box in the scene')
 
 
