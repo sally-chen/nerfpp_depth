@@ -50,6 +50,7 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True, lidar_image=
 
             pose[:2, 3] = ((pose[:2, 3] - min ) / (max - min) - avg_pose ) * 0.5
             loc[:, :2] = ((loc[:, :2] - min ) / (max - min) - avg_pose ) * 0.5
+            loc[:, 2] = (loc[:, 2] - 2.8) / 30.
 
 
         ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose, box_loc=loc, lidar_scan=lidar_image))

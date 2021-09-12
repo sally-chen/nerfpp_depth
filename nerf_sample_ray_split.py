@@ -400,7 +400,7 @@ class RaySamplerSingleImage(object):
         if self.box_loc is None:
             box_loc = None
         else:
-            box_loc = self.box_loc.unsqueeze(0).to(rank).expand(self.rays_d.shape[0], box_number,3)
+            box_loc = self.box_loc.unsqueeze(0).to(rank).expand(self.rays_d.shape[0], box_number, 9)
 
 
         ret = OrderedDict([

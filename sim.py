@@ -42,9 +42,10 @@ class Sim:
 
         ray_samplers = load_data_array([intrs], [x], [c],
                 self.h, self.w, False, True, not self.camera)
-
+        cube_size = None
         time0 = time.time()
-        ret = render_single_image(self.models, ray_samplers[0], self.args.chunk_size,
+        ret = render_single_image(self.models, ray_samplers[0],
+                                  self.args.chunk_size,
                                   have_box=self.args.have_box,
                                   box_number=self.args.box_number,
                                   train_box_only=self.args.train_box_only,
@@ -149,9 +150,10 @@ def yaw_to_mat(yaws):
     return Rf
 
 
-def make_sim(config_path, frame_height, frame_width, depth=60., camera=False):
+def make_sim(config_path, frame_height, frame_width, depth=60., camera=False, box_num=6):
     parser = config_parser()
     args = parser.parse_args("--config " + config_path)
+    args.box_number = box_num
     logger.info(parser.format_values())
 
     if args.world_size == -1:

@@ -331,7 +331,12 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
     ray_o = rays['ray_o']
     ray_d = rays['ray_d']
-    box_loc = rays['box_loc'] if have_box else None
+    box_loc = rays['box_loc'][:, :, :3] if have_box else None
+    box_size = rays['box_loc'][:, :, 3:6]
+    box_color = rays['box_loc'][:, :, 6:]
+
+#    print(box_loc.shape)
+#    print(box_size.shape)
     fg_z_vals_centre = rays['fg_z_vals_centre']
 
     fg_far_depth = rays['fg_far_depth']
@@ -389,7 +394,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
 
         else:
-            ret = net(ray_o.float(), ray_d.float(), fg_far_depth.float(), fg_depth.float(), bg_depth.float(), box_loc.float())
+            ret = net(ray_o.float(), ray_d.float(), fg_far_depth.float(), fg_depth.float(), bg_depth.float(), box_loc.float(), box_size, box_color)
 
 
         # fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
