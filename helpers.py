@@ -310,8 +310,16 @@ def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_
 
     # we give it 1 when a point falls in any of the boxes
 
-    in_boxes_compare = torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs)  # N, N_samples, N_b,
-    in_boxes = torch.sum(in_boxes_compare, dim=-1) == 3  # N, N_samples, N_b,
+    # box size or box_loc (N_rays[0], box_number, 3) fg_pts  (N_rays + [N_samples, box_number, 3])
+    abs_dist = torch.abs(fg_pts - box_loc.unsqueeze(1).expand(-1,N_samples,-1,-1)) / box_size.unsqueeze(1).expand(-1,N_samples,-1,-1) #box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
+    inside_box = 0.5  - abs_dist
+    weights = torch.prod(torch.sigmoid(inside_box * 10000), dim=-1) # N_rays + [N_samples, box_number]
+    # print(inside_box[0])
+
+
+
+    # in_boxes_compare = torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs)  # N, N_samples, N_b,
+    in_boxes = weights > 0.95 #torch.sum(in_boxes_compare, dim=-1) == 3  # N, N_samples, N_b,
 
     # test = in_boxes.cpu().numpy()
     in_any_box = torch.sum(in_boxes, dim=-1) > 0.0  # N, N_samples,

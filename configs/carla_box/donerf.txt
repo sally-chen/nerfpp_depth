@@ -2,7 +2,7 @@
 ### INPUT
 datadir = /media/diskstation/sally/data/
 scene = carla_15x15x20_6box_set2  #_height #big_inters_nom15_samp4x4 #carla_15x15x20_nobox_parses_seg
-expname = box_sample192_rgb64_seg_box_6box_sh25_m25_z5 #box_sample192_rgb64_6box_net4_transmsh26-m75_samp100_perturb_enc6
+expname = box_sample192_rgb64_seg_box_6box_sh26_m75_z3 #box_sample192_rgb64_6box_net4_transmsh26-m75_samp100_perturb_enc6
 
 
 
@@ -25,7 +25,7 @@ cascade_samples = 64
 
 ### TESTING
 
-chunk_size = 8192
+chunk_size = 512
 
 
 
@@ -66,5 +66,5 @@ seg_box_loss = True
 
 box_number = 6
 
-box_size = 1,1,1
+box_size = 1,2,0.5
 

@@ -35,10 +35,12 @@ def gen_box_locs(count=55, box_number=10):
     ct2 = 20
     np.random.seed(123)
     loc1 = np.concatenate((np.random.uniform(81., 89., (ct1, box_number, 1)),
-                          np.random.uniform(110., 120., (ct1,box_number, 1))), axis=-1)
+                            np.random.uniform(110., 120., (ct1, box_number, 1)),
+                          np.random.uniform(-0.09, 0.09, (ct1,box_number, 1))), axis=-1)
 
     loc2 = np.concatenate((np.random.uniform(90., 98., (ct2, box_number, 1)),
-                          np.random.uniform(111., 118., (ct2, box_number,1))), axis=-1)
+                            np.random.uniform(111., 118., (ct2, box_number, 1)),
+                          np.random.uniform(-0.09, 0.09, (ct2, box_number,1))), axis=-1)
 
     loc = np.concatenate([loc1,loc2], axis=0)
 
@@ -46,13 +48,13 @@ def gen_box_locs(count=55, box_number=10):
     min = np.array([85., 125., 2.8])
     max_minus_min = max-min
     avg_pos = np.array([0.5, 0.5, 0.0])
-    loc -= min[:2]
-    loc /= (max_minus_min)[:2]
+    loc[...,:2] -= min[:2]
+    loc[...,:2] /= (max_minus_min)[:2]
     # print(loc)![](logs/box_sample192_rgb64_6box_transm25-m10/render_test_525000/000008.png)
-    loc -= avg_pos[:2]
-    loc *= 0.5
+    loc[...,:2] -= avg_pos[:2]
+    loc[...,:2] *= 0.5
 
-    loc = np.concatenate((loc, -0.06 * np.ones((count,box_number,1))), axis=-1)
+    # loc = np.concatenate((loc, -0.06 * np.ones((count,box_number,1))), axis=-1)
     # loc = np.concatenate((loc, -1. * np.ones((count,box_number,1))), axis=-1)
 
     return loc
