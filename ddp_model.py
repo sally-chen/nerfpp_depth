@@ -8,7 +8,7 @@ from collections import OrderedDict
 from nerf_network import Embedder, MLPNet, MLPNetClassier
 import os
 import logging
-from pytorch3d.transforms import axis_angle_to_matrix
+from pytorch3d.transforms import euler_angles_to_matrix
 
 logger = logging.getLogger(__package__)
 
@@ -735,14 +735,14 @@ class NerfNetMoreBox(nn.Module):
 
         # box_rot = np.array([[15, 25, 35], [10, 5, 10], [45, 55, 35], [15, 25, 35], [10, 5, 10], [45, 55, 35],[15, 25, 35], [10, 5, 10], [45, 55, 35]])
         # r = torch.Tensor(R.from_euler('xyz', box_rot, degrees=True).as_matrix()).cuda()
-        r = axis_angle_to_matrix(torch.deg2rad(box_rot))
+        r = euler_angles_to_matrix(torch.deg2rad(box_rot), convention='XYZ')
         r = r.unsqueeze(0).unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3, 3]).float()
 
         # offset = (fg_pts - box_loc.unsqueeze(1).expand(-1, N_samples, -1, -1)).unsqueeze(-1).float()
         # offset_rot = torch.abs(torch.matmul(r, offset)).squeeze(-1)
         # abs_dist = offset_rot / box_size.unsqueeze(1).expand(-1, N_samples, -1, -1)
 
-        box_offset = ((torch.matmul(r ,
+        box_offset = ((torch.matmul(torch.inverse(r) ,
                         (fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
                         - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])).unsqueeze(-1)).squeeze(-1))/
                       box_sizes.unsqueeze(0).unsqueeze(0))\

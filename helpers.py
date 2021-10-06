@@ -12,7 +12,7 @@ import torch
 from scipy.spatial.transform import Rotation as R
 
 from utils import normalize_torch
-from pytorch3d.transforms import axis_angle_to_matrix
+from pytorch3d.transforms import euler_angles_to_matrix
 
 TINY_NUMBER = float(1e-6)
 
@@ -291,7 +291,7 @@ def get_box_transmittance_weight(box_loc, fg_z_vals, ray_d, ray_o, fg_depth,box_
 
 
     # r = torch.Tensor(R.from_euler('xyz', box_rot, degrees=True).as_matrix()).cuda()
-    r = axis_angle_to_matrix(torch.deg2rad(box_rot))
+    r = euler_angles_to_matrix(torch.deg2rad(box_rot), convention='XYZ')
     r_mat = r.unsqueeze(0).unsqueeze(1).expand(N_rays + [N_samples, box_number, 3,3]).float()
 
     fg_ray_o = ray_o.unsqueeze(-2).expand(N_rays + [N_samples, 3])
@@ -325,8 +325,8 @@ def get_box_transmittance_weight(box_loc, fg_z_vals, ray_d, ray_o, fg_depth,box_
 
     offset = (fg_pts - box_loc.unsqueeze(1).expand(-1,N_samples,-1,-1)).unsqueeze(-1).float()
 
-    offset_rot = torch.abs(torch.matmul(r_mat, offset)).squeeze(-1)
-    abs_dist  =offset_rot / box_size.unsqueeze(1).expand(-1,N_samples,-1,-1)  #box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
+    offset_rot = torch.abs(torch.matmul(torch.inverse(r_mat), offset)).squeeze(-1)
+    abs_dist  = offset_rot / box_size.unsqueeze(1).expand(-1,N_samples,-1,-1)  #box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
     inside_box = 0.5  - abs_dist
     weights = torch.prod(torch.sigmoid(inside_box * 10000), dim=-1) # N_rays + [N_samples, box_number]
     # print(inside_box[0])
