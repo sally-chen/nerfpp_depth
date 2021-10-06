@@ -68,31 +68,11 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         nums = open(filename).read().split()
         return np.array([float(x) for x in nums]).reshape([4, 4]).astype(np.float32)
 
-    split_dir = '{}/{}/{}'.format(basedir, scene, split)
-
-    if only_img_files:
-        img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg'])
-        return img_files
-
-
-
-
-    # camera parameters files
-    intrinsics_files = find_files('{}/intrinsics'.format(split_dir), exts=['*.txt'])
-    pose_files = find_files('{}/pose'.format(split_dir), exts=['*.txt'])
-    logger.info('raw intrinsics_files: {}'.format(len(intrinsics_files)))
-    logger.info('raw pose_files: {}'.format(len(pose_files)))
-
-    intrinsics_files = intrinsics_files[::skip]
-    pose_files = pose_files[::skip]
-    cam_cnt = len(pose_files)
-
     def parse_txt_loc(filename, norm=False, box_number=10):
         nums = open(filename).read().split()
         nums = np.array([float(x) for x in nums])
 
-        #nums_new = nums.reshape(box_number, 3)
-
+        # nums_new = nums.reshape(box_number, 3)
 
         # if norm:
         #     max = np.array([100,140])
@@ -117,11 +97,10 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         #
         # nums_new[:,2] = z_box_normed
 
-
         nums_new = np.zeros([box_number, 3])
         # nums_new[:2] = nums + random.randint(-20,20)/100.
         nums = nums.reshape(box_number, 2)
-        nums_new[:,:2] = nums
+        nums_new[:, :2] = nums
 
         # !!! CHANGE from -1 to z-normlized value
         z_box_scene = 1.
@@ -129,10 +108,29 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
         z_box_normed = (z_box_scene - z_cam_scene) / 30.
 
-        nums_new[:,2] = z_box_normed
-
+        nums_new[:, 2] = z_box_normed
 
         return nums_new.astype(np.float32)
+
+    split_dir = '{}/{}/{}'.format(basedir, scene, split)
+
+    if only_img_files:
+        img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg'])
+        return img_files
+
+
+
+
+    # camera parameters files
+    intrinsics_files = find_files('{}/intrinsics'.format(split_dir), exts=['*.txt'])
+    pose_files = find_files('{}/pose'.format(split_dir), exts=['*.txt'])
+    logger.info('raw intrinsics_files: {}'.format(len(intrinsics_files)))
+    logger.info('raw pose_files: {}'.format(len(pose_files)))
+
+    intrinsics_files = intrinsics_files[::skip]
+    pose_files = pose_files[::skip]
+    cam_cnt = len(pose_files)
+
 
     if have_box:
         # locs = np.load('{}/box_loc.npy'.format(split_dir))
@@ -140,6 +138,8 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
         loc_files = find_files('{}/loc'.format(split_dir), exts=['*.txt'])
         loc_files = loc_files[::skip]
+
+
 
 
 

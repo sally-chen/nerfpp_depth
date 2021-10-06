@@ -135,7 +135,7 @@ def sample_pdf(bins, weights, N_samples, det=False):
 
 def render_single_image(models, ray_sampler, chunk_size,
                         train_box_only=False, have_box=False,
-                        donerf_pretrain=False, box_number=10, box_size=1, front_sample=128, back_sample=128,
+                        donerf_pretrain=False, box_number=10, box_size=1, front_sample=128, back_sample=128, box_props=None,
                         fg_bg_net=True, use_zval=True,loss_type='bce',rank=0, DEBUG=True):
     """
     Render an image using the NERF.
@@ -188,7 +188,7 @@ def render_single_image(models, ray_sampler, chunk_size,
 
         chunk_ret = render_rays(models, _rays, train_box_only, have_box,
                                 donerf_pretrain, front_sample, back_sample,
-                                fg_bg_net, use_zval, loss_type, box_number=box_number, box_size=box_size)
+                                fg_bg_net, use_zval, loss_type, box_number=box_number, box_props=box_props)
 
 
         if donerf_pretrain:
@@ -325,7 +325,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
 
 
 def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
-                front_sample, back_sample, fg_bg_net, use_zval, loss_type, box_number, box_size):
+                front_sample, back_sample, fg_bg_net, use_zval, loss_type, box_number, box_props=None):
 
     """Render a set of rays using specific config."""
 
@@ -334,6 +334,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
     ray_o = rays['ray_o']
     ray_d = rays['ray_d']
     box_loc = rays['box_loc'] if have_box else None
+    box_props = torch.Tensor(box_props).type_as(box_loc) if box_props is not None else torch.ones([box_number,9]).type_as(box_loc)
     fg_z_vals_centre = rays['fg_z_vals_centre']
 
     fg_far_depth = rays['fg_far_depth']
@@ -367,10 +368,10 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
 
 
-            box_weights = get_box_transmittance_weight(box_loc=box_loc, box_size=box_size,
+            box_weights = get_box_transmittance_weight(box_loc=box_loc,
                                          fg_z_vals=fg_z_vals_centre,  ray_d=ray_d,
                                          ray_o=ray_o,
-                                         fg_depth=fg_far_depth, box_number=box_number)
+                                         fg_depth=fg_far_depth, box_number=box_number, box_props=box_props)
 
             ## resample from box_nerf
             # fg_weights = fg_weights + normalize_torch(box_weights)
@@ -392,7 +393,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
 
         else:
-            ret = net(ray_o.float(), ray_d.float(), fg_far_depth.float(), fg_depth.float(), bg_depth.float(), box_loc.float())
+            ret = net(ray_o.float(), ray_d.float(), fg_far_depth.float(), fg_depth.float(), bg_depth.float(), box_loc.float(), box_props.float())
 
 
         # fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
@@ -725,10 +726,13 @@ def ddp_train_nerf(rank, args):
     # HERE SHOULD HAVE ONE HOT EMBEDDING
     ray_samplers = load_data_split(args.datadir, args.scene, split='train',
                                    try_load_min_depth=args.load_min_depth, have_box=args.have_box,
-                                   train_depth=True, train_seg=args.train_seg, train_box_only=args.train_box_only, box_number=args.box_number)
+                                   train_depth=True, train_seg=args.train_seg, train_box_only=args.train_box_only,
+                                   box_number=args.box_number)
     val_ray_samplers = load_data_split(args.datadir, args.scene, split='test',
                                        try_load_min_depth=args.load_min_depth, skip=args.testskip, have_box=args.have_box,
-                                       train_depth=True , train_seg=args.train_seg, train_box_only=args.train_box_only, box_number=args.box_number)
+                                       train_depth=True , train_seg=args.train_seg, train_box_only=args.train_box_only,
+                                       box_number=args.box_number)
+
 
 
 
@@ -878,7 +882,6 @@ def ddp_train_nerf(rank, args):
 
                     box_weights = get_box_transmittance_weight(box_loc=ray_batch['box_loc'], box_size=args.box_size,
                                                                fg_z_vals=perturbed_seg_bound_fg, ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'],
-
                                                                fg_depth=ray_batch['fg_far_depth'], box_number=args.box_number)
                     box_weights[ray_batch['fg_z_vals_centre'] < 0.0002] = 0.
 

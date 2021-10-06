@@ -36,11 +36,11 @@ def gen_box_locs(count=55, box_number=10):
     np.random.seed(123)
     loc1 = np.concatenate((np.random.uniform(81., 89., (ct1, box_number, 1)),
                             np.random.uniform(110., 120., (ct1, box_number, 1)),
-                          np.random.uniform(-0.09, 0.09, (ct1,box_number, 1))), axis=-1)
+                          np.random.uniform(-0.09, 0.02, (ct1,box_number, 1))), axis=-1)
 
     loc2 = np.concatenate((np.random.uniform(90., 98., (ct2, box_number, 1)),
                             np.random.uniform(111., 118., (ct2, box_number, 1)),
-                          np.random.uniform(-0.09, 0.09, (ct2, box_number,1))), axis=-1)
+                          np.random.uniform(-0.09, 0.02, (ct2, box_number,1))), axis=-1)
 
     loc = np.concatenate([loc1,loc2], axis=0)
 
@@ -249,7 +249,7 @@ def load_pose_data(basedir):
     return final_product.astype(np.double), K.astype(np.double)
 
 def load_data_split_video(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False,
-                          train_seg=False, train_depth=False, have_box=True, box_number=10):
+                          train_seg=False, train_depth=False, have_box=True, box_number=10,  box_props_path='' ):
     def parse_txt(filename):
         assert os.path.isfile(filename)
         nums = open(filename).read().split()
@@ -259,6 +259,7 @@ def load_data_split_video(basedir, scene, split, skip=1, try_load_min_depth=True
         assert os.path.isfile(filename)
         nums = open(filename).read().split()
         return np.array([float(x) for x in nums]).reshape([1, 2]).astype(np.float32)
+
 
     if basedir[-1] == '/':  # remove trailing '/'
         basedir = basedir[:-1]
@@ -325,6 +326,7 @@ def load_data_split_video(basedir, scene, split, skip=1, try_load_min_depth=True
         assert (len(depth_files) == cam_cnt)
     else:
         depth_files = [None, ] * cam_cnt
+
 
     cube_loc = gen_box_locs(trajectory_pose.shape[0], box_number)
 

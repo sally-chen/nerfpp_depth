@@ -8,6 +8,7 @@ from collections import OrderedDict
 from nerf_network import Embedder, MLPNet, MLPNetClassier
 import os
 import logging
+from pytorch3d.transforms import axis_angle_to_matrix
 
 logger = logging.getLogger(__package__)
 
@@ -686,12 +687,12 @@ class NerfNetMoreBox(nn.Module):
 
         self.box_number = args.box_number
 
-        self.box_size = [float(size) for size in args.box_size.split(',')]
+        # self.box_size = [float(size) for size in args.box_size.split(',')]
+        #
+        # # device = torch.device(torch.cuda.current_device() if torch.cuda.is_available() else 'cpu')
+        # self.box_size = torch.tensor(self.box_size).cuda().to(torch.cuda.current_device())
 
-        # device = torch.device(torch.cuda.current_device() if torch.cuda.is_available() else 'cpu')
-        self.box_size = torch.tensor(self.box_size).cuda().to(torch.cuda.current_device())
-
-    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only=False):
+    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, box_props, query_box_only=False):
         '''orch.c
         :param ray_o, ray_d: [..., 3]
         :param fg_z_max: [...,]
@@ -721,13 +722,30 @@ class NerfNetMoreBox(nn.Module):
         # box_loc(N, [x1,y1,z1,x2,y2,z2,...])
         box_loc = box_loc.view(-1, self.box_number, 3)
 
+        colors, box_sizes, box_rot =  box_props[:, 0:3], box_props[:, 3:6], box_props[:, 6:]
+
+        assert box_sizes.shape == (self.box_number, 3), 'box_sizes shape is wrong'
+        assert box_rot.shape == (self.box_number, 3), 'box_rot shape is wrong'
+
         fg_box_raw_lst = []
 
         self.box_net = self.box_net.to(torch.cuda.current_device())
 
+        from scipy.spatial.transform import Rotation as R
 
-        box_offset = (((fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
-                      - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])))/self.box_size)\
+        # box_rot = np.array([[15, 25, 35], [10, 5, 10], [45, 55, 35], [15, 25, 35], [10, 5, 10], [45, 55, 35],[15, 25, 35], [10, 5, 10], [45, 55, 35]])
+        # r = torch.Tensor(R.from_euler('xyz', box_rot, degrees=True).as_matrix()).cuda()
+        r = axis_angle_to_matrix(torch.deg2rad(box_rot))
+        r = r.unsqueeze(0).unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3, 3]).float()
+
+        # offset = (fg_pts - box_loc.unsqueeze(1).expand(-1, N_samples, -1, -1)).unsqueeze(-1).float()
+        # offset_rot = torch.abs(torch.matmul(r, offset)).squeeze(-1)
+        # abs_dist = offset_rot / box_size.unsqueeze(1).expand(-1, N_samples, -1, -1)
+
+        box_offset = ((torch.matmul(r ,
+                        (fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
+                        - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])).unsqueeze(-1)).squeeze(-1))/
+                      box_sizes.unsqueeze(0).unsqueeze(0))\
             .permute(0,2,1,3).reshape(dots_sh[0]*self.box_number, N_samples, 3)
 
 
@@ -742,7 +760,13 @@ class NerfNetMoreBox(nn.Module):
 
 
         fg_box_raw_sigma__ = fg_box_raw['sigma'].view(dots_sh[0], self.box_number, N_samples)
-        fg_box_raw_rgb = fg_box_raw['rgb'].view(dots_sh[0], self.box_number, N_samples, 3)
+
+        # color = torch.Tensor([[0.5, 0.1, 0.9], [0.9, 0.1, 0.4], [0.2, 0.9, 0.5], [0.6, 0.7, 0.9], [0.3, 0.5, 0.3],
+        #                       [0.4, 0.6, 0.5],[0.8, 0.2, 0.2], [0.4, 0.4, 0.9], [0.8, 0.1, 0.8]]).cuda()
+
+        colors = colors.unsqueeze(0).unsqueeze(-2).expand(dots_sh[0], -1, N_samples, 3)
+
+        fg_box_raw_rgb = fg_box_raw['rgb'].view(dots_sh[0], self.box_number, N_samples, 3) * colors
 
         def filter_sigma(fg_box_raw_sigma_, box_loc, fg_z_vals, fg_pts):
 
@@ -783,7 +807,7 @@ class NerfNetMoreBox(nn.Module):
 
 
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
-        inside_box = 0.45 / 30. - abs_dist
+        inside_box = 0.5 / 30. - abs_dist
         weights = torch.prod(torch.sigmoid(inside_box * 10000), dim=-1)
         # print(inside_box[0])
 
@@ -857,7 +881,7 @@ class NerfNetMoreBox(nn.Module):
 
         fg_rgb = torch.div(torch.sum(fg_box_raw_sigma.unsqueeze(-1) * fg_box_raw_rgb, dim=1)
                   + fg_raw['sigma'].unsqueeze(-1) * fg_raw['rgb'],
-                  fg_raw['sigma'].unsqueeze(-1) + torch.sum(fg_box_raw_sigma, dim=1).unsqueeze(-1))
+                  fg_raw['sigma'].unsqueeze(-1) + torch.sum(fg_box_raw_sigma, dim=1).unsqueeze(-1) + 0.0001)
 
 
 

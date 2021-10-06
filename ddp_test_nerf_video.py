@@ -103,10 +103,19 @@ def ddp_test_nerf(rank, args):
         ray_samplers_video = load_data_split_video(args.datadir, args.scene, split,
                                                    box_number=args.box_number, try_load_min_depth=args.load_min_depth)
 
+        def get_box_props(box_number):
+            box_props =  np.array([[0.5, 0.1, 0.9, 1,2,1, 15, 25, 35], [0.9, 0.1, 0.4, 1,3,1, 10, 5, 10], [0.2, 0.9, 0.5, 2,1,1, 45, 55, 35], [0.6, 0.7, 0.9, 1,1,2, 15, 25, 35], [0.3, 0.5, 0.3, 1,0.5,1, 10, 5, 10],
+                                  [0.4, 0.6, 0.5, 1,0.5,0.5,45, 55, 35],[0.8, 0.2, 0.2, 0.5,1,1, 15, 25, 35], [0.4, 0.4, 0.9, 1,0.3,1, 10, 5, 10], [0.8, 0.1, 0.8, 1,1,1, 45, 55, 35]])
+
+            assert box_props.shape == (box_number, 9)
+
+            return box_props
+
+        box_props = get_box_props(args.box_number)
 
         for idx in range(len(ray_samplers_video)):
 
-            if idx < 7:
+            if idx < 6:
                 continue
 
             print('rendering : {}'.format(idx))
@@ -125,6 +134,7 @@ def ddp_test_nerf(rank, args):
                 rgb, d, pred_fg, pred_bg, label, others = render_single_image(models, ray_samplers_video[idx],
                                                                           args.chunk_size,
                                                                           args.train_box_only, have_box=args.have_box,
+                                                                          box_props=box_props,
                                                                           donerf_pretrain=args.donerf_pretrain,
                                                                           front_sample=args.front_sample,
                                                                           back_sample=args.back_sample,

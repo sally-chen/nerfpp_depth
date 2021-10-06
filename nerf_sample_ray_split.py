@@ -381,6 +381,8 @@ class RaySamplerSingleImage(object):
             box_loc = torch.from_numpy(self.box_loc).unsqueeze(0).to(rank).expand(self.rays_d.shape[0], box_number,3)
 
 
+
+
         ret = OrderedDict([
             ('ray_o', self.rays_o),
             ('ray_d', self.rays_d),
@@ -397,6 +399,7 @@ class RaySamplerSingleImage(object):
             ('min_depth', min_depth),
             ('img_name', self.img_path),
             ('box_loc', box_loc)
+
 
         ])
         for k in ret:
@@ -859,7 +862,7 @@ class RaySamplerSingleImage(object):
 
         return cls_label_flat_filtered_, fg_pts_flat, bg_pts_flat, bg_z_vals, fg_z_vals
 
-    def random_sample_classifier(self, N_rand, N_front_sample, N_back_sample, pretrain, rank):
+    def random_sample_classifier(self, N_rand, N_front_sample, N_back_sample, pretrain, rank, box_number=10):
 
         if self.pole_inds is not None:
             all_ind = np.delete(np.arange(self.H * self.W), self.pole_inds)
@@ -889,24 +892,6 @@ class RaySamplerSingleImage(object):
                 axis_filtered_depth_flat, fg_pts_flat, bg_pts_flat, bg_z_vals_centre, fg_z_vals_centre = \
                     self.get_classifier_label_torch(N_front_sample, N_back_sample, pretrain, select_inds=select_inds,
                                                     rank=rank)
-
-        # if center_crop:
-        #     half_H = self.H // 2
-        #     half_W = self.W // 2
-        #     quad_H = half_H // 2
-        #     quad_W = half_W // 2
-        #
-        #     # pixel coordinates
-        #     u, v = np.meshgrid(np.arange(half_W - quad_W, half_W + quad_W),
-        #                        np.arange(half_H - quad_H, half_H + quad_H))
-        #     u = u.reshape(-1)
-        #     v = v.reshape(-1)
-        #
-        #     select_inds = np.random.choice(u.shape[0], size=(N_rand,), replace=False)
-        #
-        #     # Convert back to original image
-        #     select_inds = v[select_inds] * self.W + u[select_inds]
-
         # select_inds = np.random.choice(self.box_inds[0].shape[0], size=(N_rand,), replace=False)
         # select_inds = self.box_inds[0][select_inds]
 
@@ -955,6 +940,7 @@ class RaySamplerSingleImage(object):
             min_depth = self.min_depth[select_inds]
         else:
             min_depth = 1e-4 * np.ones_like(rays_d[..., 0])
+
 
         ret = OrderedDict([
             ('ray_o', rays_o),

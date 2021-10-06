@@ -9,8 +9,10 @@ import PIL.Image
 from torchvision.transforms import ToTensor
 import io
 import torch
+from scipy.spatial.transform import Rotation as R
 
 from utils import normalize_torch
+from pytorch3d.transforms import axis_angle_to_matrix
 
 TINY_NUMBER = float(1e-6)
 
@@ -266,12 +268,7 @@ def triangle_filter( occupancy, Z=5):
 
     return occupancy_filtered
 
-def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_depth,box_number=10):
-
-
-
-    sizes = [float(size) for size in box_size.split(',')]
-    assert len(sizes) == 3
+def get_box_transmittance_weight(box_loc, fg_z_vals, ray_d, ray_o, fg_depth,box_number=10, box_props=None):
 
 
     # pts: N x 128 x 3
@@ -283,8 +280,20 @@ def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_
     assert box_loc.shape == (ray_o.shape[0], box_number, 3)
 
     N_rays = list(ray_d.shape[:1])
-
     N_samples = fg_z_vals.shape[-1]
+
+    box_sizes, box_rot = box_props[:,3:6], box_props[:,6:]
+
+    assert box_sizes.shape == (box_number, 3), 'box_sizes shape is wrong'
+    assert box_rot.shape == (box_number, 3), 'box_rot shape is wrong'
+
+    # box_rot = np.array([[15, 25, 35], [10, 5, 10], [45, 55, 35], [15, 25, 35], [10, 5, 10], [45, 55, 35],[15, 25, 35], [10, 5, 10], [45, 55, 35]])
+
+
+    # r = torch.Tensor(R.from_euler('xyz', box_rot, degrees=True).as_matrix()).cuda()
+    r = axis_angle_to_matrix(torch.deg2rad(box_rot))
+    r_mat = r.unsqueeze(0).unsqueeze(1).expand(N_rays + [N_samples, box_number, 3,3]).float()
+
     fg_ray_o = ray_o.unsqueeze(-2).expand(N_rays + [N_samples, 3])
     fg_ray_d = ray_d.unsqueeze(-2).expand(N_rays + [N_samples, 3])
     fg_pts = fg_ray_o + fg_z_vals.unsqueeze(-1) * fg_ray_d
@@ -297,8 +306,10 @@ def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_
 
     # box_size = torch.Tensor([[1/20.,1/20.,3.]]).to(torch.cuda.current_device())
 
-    box_size = torch.Tensor([[sizes[0] / 26., sizes[1] / 26., sizes[2]/26.]]).type_as(box_loc).unsqueeze(0).expand(
-        N_rays + [box_number, 3])
+    # box_size = torch.Tensor([[sizes[0] / 26., sizes[1] / 26., sizes[2]/26.]]).type_as(box_loc).unsqueeze(0).expand(
+    #     N_rays + [box_number, 3])
+
+    box_size = (box_sizes/26.).type_as(box_loc).unsqueeze(0).expand(N_rays + [box_number, 3])
 
     assert box_size.shape == (N_rays[0], box_number, 3)
 
@@ -311,7 +322,11 @@ def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_
     # we give it 1 when a point falls in any of the boxes
 
     # box size or box_loc (N_rays[0], box_number, 3) fg_pts  (N_rays + [N_samples, box_number, 3])
-    abs_dist = torch.abs(fg_pts - box_loc.unsqueeze(1).expand(-1,N_samples,-1,-1)) / box_size.unsqueeze(1).expand(-1,N_samples,-1,-1) #box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
+
+    offset = (fg_pts - box_loc.unsqueeze(1).expand(-1,N_samples,-1,-1)).unsqueeze(-1).float()
+
+    offset_rot = torch.abs(torch.matmul(r_mat, offset)).squeeze(-1)
+    abs_dist  =offset_rot / box_size.unsqueeze(1).expand(-1,N_samples,-1,-1)  #box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
     inside_box = 0.5  - abs_dist
     weights = torch.prod(torch.sigmoid(inside_box * 10000), dim=-1) # N_rays + [N_samples, box_number]
     # print(inside_box[0])
@@ -355,7 +370,7 @@ def get_box_transmittance_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, fg_
     #     test_fg_alpha = fg_alpha.cpu().numpy()
     #     test_T = T.cpu().numpy()
     #     test_fg_weights = fg_weights_normed.cpu().numpy()
-    return fg_weights_normed * 100.
+    return fg_weights_normed * 3.
 
 
 def get_box_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, box_number=10):
