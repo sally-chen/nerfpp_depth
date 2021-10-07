@@ -9,6 +9,7 @@ from nerf_network import Embedder, MLPNet, MLPNetClassier
 import os
 import logging
 from pytorch3d.transforms import euler_angles_to_matrix
+from  helpers import check_shadow
 
 logger = logging.getLogger(__package__)
 
@@ -735,14 +736,14 @@ class NerfNetMoreBox(nn.Module):
 
         # box_rot = np.array([[15, 25, 35], [10, 5, 10], [45, 55, 35], [15, 25, 35], [10, 5, 10], [45, 55, 35],[15, 25, 35], [10, 5, 10], [45, 55, 35]])
         # r = torch.Tensor(R.from_euler('xyz', box_rot, degrees=True).as_matrix()).cuda()
-        r = euler_angles_to_matrix(torch.deg2rad(box_rot), convention='XYZ')
-        r = r.unsqueeze(0).unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3, 3]).float()
+        r = euler_angles_to_matrix(torch.deg2rad(torch.cat([box_rot[:,2:],-1*box_rot[:,1:2], -1*box_rot[:,0:1] ], dim=-1)), convention='ZYX')
+        r_mat_expand = r.unsqueeze(0).unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3, 3]).float()
 
         # offset = (fg_pts - box_loc.unsqueeze(1).expand(-1, N_samples, -1, -1)).unsqueeze(-1).float()
         # offset_rot = torch.abs(torch.matmul(r, offset)).squeeze(-1)
         # abs_dist = offset_rot / box_size.unsqueeze(1).expand(-1, N_samples, -1, -1)
 
-        box_offset = ((torch.matmul(torch.inverse(r) ,
+        box_offset = ((torch.matmul(torch.inverse(r_mat_expand) ,
                         (fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
                         - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])).unsqueeze(-1)).squeeze(-1))/
                       box_sizes.unsqueeze(0).unsqueeze(0))\
@@ -823,11 +824,15 @@ class NerfNetMoreBox(nn.Module):
             ret = OrderedDict([('fg_box_sig', fg_box_raw['sigma'])])
             return ret
 
+
+
         input = torch.cat((self.fg_embedder_position(fg_pts),
                            self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
         fg_raw = self.fg_net(input)
 
-
+        # nonlinear sampling
+        # check intersection boundry
+        #fg_raw['rgb'] = fg_raw['rgb'] * check_shadow(fg_pts, box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3]), box_sizes, r, self.box_number)
 
         # alpha blending
         fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
