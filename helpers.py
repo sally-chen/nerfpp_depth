@@ -365,10 +365,74 @@ def get_box_transmittance_weight(box_loc, fg_z_vals, ray_d, ray_o, fg_depth,box_
     #     test_fg_weights = fg_weights_normed.cpu().numpy()
     return fg_weights_normed * 3.
 
+def check_shadow_aabb_inters(fg_pts, box_loc, box_sizes, box_rot, box_number):
+    # box_rot in matrix form already, box_size original
+    from utils import HUGE_NUMBER
+    
+    input_shpe = list(fg_pts.shape[:2])
+    fg_pts = fg_pts.clone().reshape(-1, 3)
+    box_loc = box_loc.clone().reshape(-1, box_number, 3)
+    N_rays = fg_pts.shape[0]
+    sun_location = torch.Tensor([0., 0., 99.999]).type_as(fg_pts).unsqueeze(0).expand(N_rays, -1)
+    
+    assert box_loc.shape == (N_rays, box_number, 3)
+    assert box_sizes.shape == (box_number, 3), 'box_sizes shape is wrong'
+    assert box_rot.shape == (box_number, 3,3), 'box_rot shape is wrong'
+    
+    # convert ray origin and ray end to box coordinate
+    sun_location = sun_location.unsqueeze(-2).expand([N_rays, box_number, 3])  - box_loc
+    fg_pts = fg_pts.unsqueeze(-2).expand([N_rays, box_number, 3]) - box_loc
+    
+    # rotate to axis alighed box
+    sun_location_rot = torch.matmul(torch.inverse(box_rot), sun_location.unsqueeze(-1)).squeeze(-1)
+    fg_pts_rot = torch.matmul(torch.inverse(box_rot), fg_pts.unsqueeze(-1)).squeeze(-1)
+    
+    # rayd
+    ray_d_norm_rot = (fg_pts_rot - sun_location_rot) / torch.norm(fg_pts_rot - sun_location_rot, dim =-1, keepdim=True) # normalize    
+    ray_d_frac = torch.zeros_like(ray_d_norm_rot)
+    ray_d_frac[ray_d_norm_rot == 0.] = HUGE_NUMBER
+    ray_d_frac[ray_d_norm_rot != 0.] = torch.div(1., ray_d_norm_rot[ray_d_norm_rot != 0.])
+    
+    # get AABB bounds
+    box_size = (box_sizes / 28.).type_as(box_loc).unsqueeze(0).expand(N_rays, box_number, 3)
+    box_mins = torch.zeros_like(box_size) - box_size / 2  # N, N_b, 3
+    box_maxs = torch.zeros_like(box_size) + box_size / 2  # N, N_b, 3
+
+    box_mins_maxs = torch.stack([box_mins, box_maxs], dim=-1)
+    
+    ts = (box_mins_maxs - sun_location_rot.unsqueeze(-1)) * ray_d_frac.unsqueeze(-1)
+    t_mins = torch.min(ts, dim=-1)[0]
+    t_maxs = torch.max(ts, dim=-1)[0]
+
+    t_maxof_mins = torch.max(t_mins, dim=-1)[0]
+    t_minof_maxes = torch.min(t_maxs, dim=-1)[0]
+
+    # there is no intersection if tmins > tmaxs for all axis, or tmax < 0 (box behind ray) for each box
+    inters_box_each = torch.ones([N_rays, box_number]).type_as(box_loc)  # N, 127
+    inters_box_each = torch.where(torch.logical_or(torch.gt(t_maxof_mins, t_minof_maxes), torch.lt(t_minof_maxes, 0.)) ,
+                                    torch.tensor(0.0).type_as(box_loc), inters_box_each)
+
+    inters_box = torch.sum(inters_box_each, dim=-1) > 0.98
+    rad_show = torch.ones([N_rays]).type_as(box_loc)
+    rad_show[inters_box] = 0.5
+
+    # if torch.sum(inters_box, dim=-1) > 0:
+    #     print("STOP HERE")
+    #     inters_box_test = inters_box.cpu().numpy()
+    #     inters_box_each = inters_box_each.cpu().numpy()
+    #     t_maxof_mins = t_maxof_mins.cpu().numpy()
+    #     t_minof_maxes = t_minof_maxes.cpu().numpy()
+    #     box_mins_maxs = box_mins_maxs.cpu().numpy()
+    #     t_mins = t_mins.cpu().numpy()
+    #     t_maxs = t_maxs.cpu().numpy()
+    #
+
+    return rad_show.reshape(input_shpe).unsqueeze(-1)  # [N_rays, n_samples,1]
+
 
 def check_shadow(fg_pts, box_loc, box_sizes, box_rot, box_number):
 
-    # box_rot in matrix form already, box_size
+    # box_rot in matrix form already, box_size original
 
     input_shpe = list(fg_pts.shape[:2])
 
@@ -376,28 +440,43 @@ def check_shadow(fg_pts, box_loc, box_sizes, box_rot, box_number):
     box_loc = box_loc.clone().reshape(-1,box_number,3)
     N_rays = fg_pts.shape[0]
     N_samples = 40
-    sun_location = torch.Tensor([0., 0., 0.999]).type_as(fg_pts).unsqueeze(0).expand(N_rays, -1)
-
-    ray_d_norm = (fg_pts - sun_location) / torch.norm(fg_pts - sun_location, dim =-1, keepdim=True) # normalize
-
-    step = torch.norm(fg_pts - sun_location, dim =-1) / (N_samples)  # fg step size  --> will make this constant eventually [H*W]
-
-    fg_z_vals = torch.stack([i * step for i in range(N_samples+1)],  dim=-1)  # [..., N_samples] distance to camera till unit sphere
-
-    fg_z_vals_centre = step.unsqueeze(-1) / 2. + fg_z_vals
-    fg_z_vals_centre = fg_z_vals_centre[:, :-1]
-    sun_ray_pts = sun_location.unsqueeze(-2).expand(N_rays,N_samples,-1) + fg_z_vals_centre.unsqueeze(-1) * ray_d_norm.unsqueeze(-2)  # [H*W, N_samples, 3]
-
     multiplier = 10
-
+    sun_location = torch.Tensor([0., 0., 0.999]).type_as(fg_pts).unsqueeze(0).expand(N_rays, -1)
+    
     assert box_loc.shape == (N_rays, box_number, 3)
     assert box_sizes.shape == (box_number, 3), 'box_sizes shape is wrong'
     assert box_rot.shape == (box_number, 3,3), 'box_rot shape is wrong'
 
+    ray_d_norm = (fg_pts - sun_location) / torch.norm(fg_pts - sun_location, dim =-1, keepdim=True) # normalize
+
+    # linear
+    # step = torch.norm(fg_pts - sun_location, dim =-1) / (N_samples)  # fg step size  --> will make this constant eventually [H*W]
+    # fg_z_vals = torch.stack([i * step for i in range(N_samples+1)],  dim=-1)  # [..., N_samples] distance to camera till unit sphere
+    # fg_z_vals_centre = step.unsqueeze(-1) / 2. + fg_z_vals
+    # fg_z_vals_centre = fg_z_vals_centre[:, :-1]
+
+
+    near, far = 0.001*torch.ones([N_rays]),  torch.norm(fg_pts - sun_location, dim =-1)-0.001
+    near, far = near.unsqueeze(-1).expand(-1, N_samples+1).type_as(box_loc), \
+                far.unsqueeze(-1).expand(-1, N_samples+1).type_as(box_loc)
+
+    # inverse sample
+    # t_vals = torch.linspace(0.,1.,N_samples+1).unsqueeze(0).expand(N_rays, N_samples+1).type_as(box_loc)
+    # fg_z_vals = 1. / (1. / near * ( 1 - t_vals) + 1 / far * (t_vals))
+
+    t_vals = (torch.logspace(0., 1., N_samples + 1, base=10).unsqueeze(0).expand(N_rays, N_samples + 1).type_as(box_loc) - 1.)/9.
+    fg_z_vals = torch.flip(near * (t_vals) + far * (1. - t_vals), dims=[-1])
+
+    # steps_ = (fg_z_vals[:, 1:] - fg_z_vals[:, :1]).cpu().numpy()
+    # fg_z_vals_test = fg_z_vals.cpu().numpy()
+
+    fg_z_vals_centre = (fg_z_vals[:, 1:] - fg_z_vals[:, :1])/2 + fg_z_vals[:,:-1]
+
+    sun_ray_pts = sun_location.unsqueeze(-2).expand(N_rays,N_samples,-1) + fg_z_vals_centre.unsqueeze(-1) * ray_d_norm.unsqueeze(-2)  # [H*W, N_samples, 3]
+
     sun_ray_pts = sun_ray_pts.unsqueeze(-2).expand([N_rays, N_samples, box_number, 3])
 
-    box_size = (box_sizes / 26.).type_as(box_loc).unsqueeze(0).expand(N_rays , box_number, 3)
-
+    box_size = (box_sizes / 28.).type_as(box_loc).unsqueeze(0).expand(N_rays , box_number, 3)
 
     offset = (sun_ray_pts - box_loc.unsqueeze(1).expand(-1, N_samples, -1, -1)).unsqueeze(-1).float()
 
@@ -409,7 +488,7 @@ def check_shadow(fg_pts, box_loc, box_sizes, box_rot, box_number):
     # print(inside_box[0])
 
     # in_boxes_compare = torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs)  # N, N_samples, N_b,
-    in_boxes = weights > 0.95  # torch.sum(in_boxes_compare, dim=-1) == 3  # N, N_samples, N_b,
+    in_boxes = weights > 0.99  # torch.sum(in_boxes_compare, dim=-1) == 3  # N, N_samples, N_b,
 
     # test = in_boxes.cpu().numpy()
     in_any_box = torch.sum(in_boxes, dim=-1) > 0.0  # N, N_samples,
@@ -420,7 +499,7 @@ def check_shadow(fg_pts, box_loc, box_sizes, box_rot, box_number):
 
     assert box_occupancy.shape == (N_rays, N_samples)
 
-    box_occupancy_filtered = triangle_filter(box_occupancy, Z=3) * multiplier
+    box_occupancy_filtered = box_occupancy * multiplier
 
     assert box_occupancy_filtered.shape == (N_rays, N_samples)
 
@@ -438,7 +517,16 @@ def check_shadow(fg_pts, box_loc, box_sizes, box_rot, box_number):
     #     test_fg_alpha = fg_alpha.cpu().numpy()
     #     test_T = T.cpu().numpy()
     #     test_fg_weights = fg_weights_normed.cpu().numpy()
-    return T_light.unsqueeze(-1) # [N_rays, n_samples,1]
+    # return T_light.unsqueeze(-1) # [N_rays, n_samples,1]
+
+    # directly use occupancy -- check if the ray intersect anybox
+    in_any_box_ray = torch.sum(in_any_box, dim=-1) > 0.0  # N, N_samples,
+
+    box_occupancy_ray = torch.ones([N_rays]).type_as(box_loc)  # N, 127
+    # box_occupancy = torch.where(torch.sum(torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs), dim=-1)==3, torch.tensor(1.).type_as(box_loc), box_occupancy)
+    box_occupancy_ray = torch.where(in_any_box_ray, torch.tensor(0.7).type_as(box_loc), box_occupancy_ray)
+
+    return box_occupancy_ray.reshape(input_shpe).unsqueeze(-1) # [N_rays, n_samples,1]
 
 
 def get_box_weight(box_loc, box_size, fg_z_vals, ray_d, ray_o, box_number=10):

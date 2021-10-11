@@ -9,7 +9,7 @@ from nerf_network import Embedder, MLPNet, MLPNetClassier
 import os
 import logging
 from pytorch3d.transforms import euler_angles_to_matrix
-from  helpers import check_shadow
+from  helpers import check_shadow, check_shadow_aabb_inters
 
 logger = logging.getLogger(__package__)
 
@@ -832,7 +832,8 @@ class NerfNetMoreBox(nn.Module):
 
         # nonlinear sampling
         # check intersection boundry
-        #fg_raw['rgb'] = fg_raw['rgb'] * check_shadow(fg_pts, box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3]), box_sizes, r, self.box_number)
+        fg_raw['rgb'] = fg_raw['rgb'] * check_shadow_aabb_inters(
+            fg_pts, box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3]), box_sizes, r, self.box_number)
 
         # alpha blending
         fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
