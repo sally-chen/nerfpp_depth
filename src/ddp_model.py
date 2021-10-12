@@ -808,8 +808,8 @@ class NerfNetMoreBox(nn.Module):
 
 
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
-        inside_box = 0.5 / 30. - abs_dist
-        weights = torch.prod(torch.sigmoid(inside_box * 10000), dim=-1)
+        inside_box = 0.5 / 28. - abs_dist
+        weights = torch.prod(torch.sigmoid(inside_box * 10000.), dim=-1)
         # print(inside_box[0])
 
         fg_box_raw_sigma *= weights
