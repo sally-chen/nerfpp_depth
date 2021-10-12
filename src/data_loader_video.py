@@ -2,9 +2,9 @@ import os
 import numpy as np
 import imageio
 import logging
-from nerf_sample_ray_split import RaySamplerSingleImage
+from .nerf_sample_ray_split import RaySamplerSingleImage
 import glob
-from helpers import plot_mult_pose
+from .helpers import plot_mult_pose
 import math
 
 logger = logging.getLogger(__package__)
@@ -112,7 +112,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
     if basedir[-1] == '/':          # remove trailing '/'
         basedir = basedir[:-1]
-     
+
     split_dir = '{}/{}/{}'.format(basedir, scene, split)
 
     if only_img_files:

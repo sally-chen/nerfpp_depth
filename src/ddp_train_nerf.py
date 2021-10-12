@@ -12,22 +12,22 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing
 
 from collections import OrderedDict
-from ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
+from .ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
     NerfNetBoxOnlyWithAutoExpo, DepthOracle, DepthOracleBoxOnly, DepthOracleWithBox, NerfNetMoreBoxWithAutoExpo
 
-from nerf_network import WrapperModule
+from .nerf_network import WrapperModule
 
 import time
-from data_loader_split import load_data_split
+from .data_loader_split import load_data_split
 import numpy as np
 from tensorboardX import SummaryWriter
-from utils import img2mse, mse2psnr, entropy_loss, crossEntropy, dep_l1l2loss, img_HWC2CHW, colorize, colorize_np,to8b, normalize_torch,TINY_NUMBER
+from .utils import img2mse, mse2psnr, entropy_loss, crossEntropy, dep_l1l2loss, img_HWC2CHW, colorize, colorize_np,to8b, normalize_torch,TINY_NUMBER
 
-from helpers import calculate_metrics, log_plot_conf_mat, visualize_depth_label, loss_deviation, get_box_transmittance_weight
+from .helpers import calculate_metrics, log_plot_conf_mat, visualize_depth_label, loss_deviation, get_box_transmittance_weight, get_box_weight
 import logging
 import json
 
-from helpers import plot_ray_batch
+from .helpers import plot_ray_batch
 time_program = False
 
 logger = logging.getLogger(__package__)
@@ -135,7 +135,8 @@ def sample_pdf(bins, weights, N_samples, det=False):
 
 def render_single_image(models, ray_sampler, chunk_size,
                         train_box_only=False, have_box=False,
-                        donerf_pretrain=False, box_number=10, box_size=1, front_sample=128, back_sample=128, box_props=None,
+                        donerf_pretrain=False, box_number=10, box_size=1,
+                        front_sample=128, back_sample=128, box_props=None,
                         fg_bg_net=True, use_zval=True,loss_type='bce',rank=0, DEBUG=True):
     """
     Render an image using the NERF.
@@ -156,7 +157,7 @@ def render_single_image(models, ray_sampler, chunk_size,
 
     rays = ray_sampler.get_all_classifier(front_sample,
                                           back_sample,
-                                          pretrain=donerf_pretrain, rank=rank, train_box_only=train_box_only, box_number=box_number)
+                                          pretrain=donerf_pretrain, rank=rank, train_box_only=train_box_only,                                         box_number=box_number)
 
     chunks = (len(rays['ray_d']) + chunk_size - 1) // chunk_size
     rays_split = [OrderedDict() for _ in range(chunks)]
@@ -334,7 +335,9 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
     ray_o = rays['ray_o']
     ray_d = rays['ray_d']
     box_loc = rays['box_loc'] if have_box else None
-    box_props = torch.Tensor(box_props).type_as(box_loc) if box_props is not None else torch.ones([box_number,9]).type_as(box_loc)
+
+    box_props = box_props if box_props is not None else torch.ones([box_number,9]).type_as(box_loc)
+
     fg_z_vals_centre = rays['fg_z_vals_centre']
 
     fg_far_depth = rays['fg_far_depth']
@@ -360,7 +363,6 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
         box_weights = None
 
         if box_loc is not None:
-            from helpers import get_box_weight
             # box_weights = get_box_weight(box_loc=box_loc,
             #                              box_size=1. / 30.,
             #                              fg_z_vals=fg_z_vals_centre,
@@ -874,7 +876,6 @@ def ddp_train_nerf(rank, args):
                     #
                     # option2
                     # lets test this --- we are gettin occupancy only, maybe we could get transmittance
-                    from helpers import get_box_weight
                     # box_weights = get_box_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
                     #                              fg_z_vals=ray_batch['fg_z_vals_centre'],
                     #                              ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'], box_number=args.box_number )
@@ -1224,7 +1225,7 @@ def ddp_train_nerf(rank, args):
             torch.cuda.empty_cache()
 
         if (global_step % args.i_weights == 0 and global_step > 0):
-        
+
             # saving checkpoints and logging
             fpath = os.path.join(args.basedir, args.expname, 'model_{:06d}.pth'.format(global_step))
             to_save = OrderedDict()

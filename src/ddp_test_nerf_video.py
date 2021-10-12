@@ -9,12 +9,12 @@ import os
 # from collections import OrderedDict
 # from ddp_model import NerfNet
 import time
-from data_loader_video import load_data_split_video
-from utils import mse2psnr, colorize_np, to8b
+from .data_loader_video import load_data_split_video
+from .utils import mse2psnr, colorize_np, to8b
 import imageio
-from ddp_train_nerf import config_parser, setup_logger, render_single_image, create_nerf
+from .ddp_train_nerf import config_parser, setup_logger, render_single_image, create_nerf
 import logging
-from helpers import plot_mult_pose, write_depth_vis
+from .helpers import plot_mult_pose, write_depth_vis
 
 from PIL import Image
 from PIL import ImageDraw

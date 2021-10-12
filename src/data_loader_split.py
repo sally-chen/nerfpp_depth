@@ -3,9 +3,9 @@ import torch
 import numpy as np
 import imageio
 import logging
-from nerf_sample_ray_split import RaySamplerSingleImage
+from .nerf_sample_ray_split import RaySamplerSingleImage
 import glob
-from helpers import plot_mult_pose
+from .helpers import plot_mult_pose
 import random
 import pickle
 
@@ -50,7 +50,8 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True, lidar_image=
             print(pose.shape, loc.shape)
 
             pose[:2, 3] = ((pose[:2, 3] - min ) / (max - min) - avg_pose ) * 0.5
-            loc[:2] = ((loc[:2] - min ) / (max - min) - avg_pose ) * 0.5
+            loc[:, :2] = ((loc[:, :2] - min ) / (max - min) - avg_pose ) * 0.5
+            loc[:, 2] = (loc[:, 2] - 2.8) / 30.
 
 
         ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose, box_loc=loc, lidar_scan=lidar_image))

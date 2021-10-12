@@ -8,22 +8,22 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing
 
 from collections import OrderedDict
-from ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
+from .ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
     NerfNetBoxOnlyWithAutoExpo, DepthOracle, DepthOracleBoxOnly
 
-from nerf_network import WrapperModule
+from .nerf_network import WrapperModule
 
 import time
-from data_loader_split import load_data_split
+from .data_loader_split import load_data_split
 import numpy as np
 from tensorboardX import SummaryWriter
-from utils import img2mse, mse2psnr, entropy_loss, crossEntropy, dep_l1l2loss, img_HWC2CHW, colorize, colorize_np,to8b, normalize_torch,TINY_NUMBER
-from ddp_train_nerf import create_nerf
-from helpers import calculate_metrics, log_plot_conf_mat, visualize_depth_label, loss_deviation
+from .utils import img2mse, mse2psnr, entropy_loss, crossEntropy, dep_l1l2loss, img_HWC2CHW, colorize, colorize_np,to8b, normalize_torch,TINY_NUMBER
+from .ddp_train_nerf import create_nerf
+from .helpers import calculate_metrics, log_plot_conf_mat, visualize_depth_label, loss_deviation
 import logging
 import json
 
-from helpers import plot_ray_batch
+from .helpers import plot_ray_batch
 time_program = False
 
 logger = logging.getLogger(__package__)

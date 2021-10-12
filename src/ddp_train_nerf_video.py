@@ -6,12 +6,12 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing
 import os
 from collections import OrderedDict
-from ddp_model import NerfNetWithAutoExpo
+from .ddp_model import NerfNetWithAutoExpo
 import time
-from data_loader_split import load_data_split
+from .data_loader_split import load_data_split
 import numpy as np
 from tensorboardX import SummaryWriter
-from utils import img2mse, mse2psnr, img_HWC2CHW, colorize, TINY_NUMBER
+from .utils import img2mse, mse2psnr, img_HWC2CHW, colorize, TINY_NUMBER
 import logging
 import json
 
@@ -124,11 +124,11 @@ def sample_pdf(bins, weights, N_samples, det=False):
 def render_single_image(rank, world_size, models, ray_sampler, chunk_size):
     ##### parallel rendering of a single image
     ray_batch = ray_sampler.get_all()
-    
+
     if (ray_batch['ray_d'].shape[0] // world_size) * world_size != ray_batch['ray_d'].shape[0]:
         raise Exception('Number of pixels in the image is not divisible by the number of GPUs!\n\t# pixels: {}\n\t# GPUs: {}'.format(ray_batch['ray_d'].shape[0],
                                                                                                                                      world_size))
-    
+
     # split into ranks; make sure different processes don't overlap
     rank_split_sizes = [ray_batch['ray_d'].shape[0] // world_size, ] * world_size
     rank_split_sizes[-1] = ray_batch['ray_d'].shape[0] - sum(rank_split_sizes[:-1])

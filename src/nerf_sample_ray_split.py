@@ -5,7 +5,7 @@ import cv2
 import imageio
 from PIL import Image
 import math
-from ddp_model import depth2pts_outside, depth2pts_outside_np
+from .ddp_model import depth2pts_outside, depth2pts_outside_np
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 import pickle
 
@@ -61,6 +61,41 @@ def intersect_sphere_t(ray_o, ray_d):
     d2 = torch.sqrt(1. - torch.sum(p * p, dim=-1)) * ray_d_cos
 
     return d1 + d2
+
+
+def get_rays_single_image_t(H, W, intrinsics, c2w):
+    '''
+    :param H: image height
+    :param W: image width
+    :param intrinsics: 4 by 4 intrinsic matrix
+    :param c2w: 4 by 4 camera to world extrinsic matrix
+    :return:
+    '''
+    u, v = np.meshgrid(np.arange(W), np.arange(H))
+
+    u = u.reshape(-1).astype(dtype=np.float32) + 0.5  # add half pixel
+    v = v.reshape(-1).astype(dtype=np.float32) + 0.5
+    pixels = np.stack((u, v, np.ones_like(u)), axis=0)  # (3, H*W)
+    pixels = torch.from_numpy(pixels).type_as(c2w)
+
+    rays_d = torch.matmul(torch.inverse(intrinsics[:3, :3]), pixels) # sensor's location to camera
+    #norm_0 = np.linalg.norm(rays_d.transpose((1, 0)), axis=-1)
+
+    rays_d = torch.matmul(c2w[:3, :3], rays_d)  # (3, H*W)
+    rays_d = rays_d.transpose(1, 0)  # (H*W, 3)
+
+    #norm_1 = np.linalg.norm(rays_d, axis=-1)
+
+    rays_o = c2w[:3, 3].reshape(1, 3)
+    rays_o = rays_o.expand(rays_d.shape[0], -1)  # (H*W, 3)
+
+    ray_d_new = rays_d - rays_o
+    #norm_2 = np.linalg.norm(ray_d_new, axis=-1)
+
+    depth = torch.inverse(c2w)[2, 3]
+    depth = depth * torch.ones(rays_o.shape[0]).type_as(c2w)  # (H*W,)
+
+    return rays_o, rays_d, depth
 
 def get_rays_single_image(H, W, intrinsics, c2w):
     '''
@@ -183,7 +218,7 @@ class RaySamplerSingleImage(object):
             self.H = self.H_orig // resolution_level
 
             if rays is None:
-                self.intrinsics = np.copy(self.intrinsics_orig)
+                self.intrinsics = self.intrinsics_orig.clone()
                 self.intrinsics[:2, :3] /= resolution_level
             # only load image at this time
             if self.img_path is not None:
@@ -223,9 +258,9 @@ class RaySamplerSingleImage(object):
                 self.rays_o, self.rays_d, self.deepth = get_rays_scan(self.H, self.W, self.c2w_mat)
                 self.depth_sphere = intersect_sphere_t(self.rays_o, self.rays_d)
             else:
-                self.rays_o, self.rays_d, self.depth = get_rays_single_image(self.H, self.W,
+                self.rays_o, self.rays_d, self.depth = get_rays_single_image_t(self.H, self.W,
                                                                              self.intrinsics, self.c2w_mat)
-                self.depth_sphere = intersect_sphere(self.rays_o, self.rays_d)
+                self.depth_sphere = intersect_sphere_t(self.rays_o, self.rays_d)
 
             self.pole_inds = None
             if self.seg_path is not None:
@@ -373,14 +408,12 @@ class RaySamplerSingleImage(object):
         if self.min_depth is not None:
             min_depth = self.min_depth
         else:
-            min_depth = 1e-4 * torch.ones_like(torch.from_numpy(self.rays_d[..., 0])).to(rank)
+            min_depth = 1e-4 * torch.ones_like(self.rays_d[..., 0]).to(rank)
 
         if self.box_loc is None:
             box_loc = None
         else:
-            box_loc = torch.from_numpy(self.box_loc).unsqueeze(0).to(rank).expand(self.rays_d.shape[0], box_number,3)
-
-
+            box_loc = self.box_loc.unsqueeze(0).to(rank).expand(self.rays_d.shape[0], box_number, 3)
 
 
         ret = OrderedDict([
@@ -640,9 +673,9 @@ class RaySamplerSingleImage(object):
 
         N_rays = self.H * self.W
 
-        depth_sphere = torch.from_numpy(self.depth_sphere).to(rank)
-        rays_o = torch.from_numpy(self.rays_o).to(rank)
-        rays_d = torch.from_numpy(self.rays_d).to(rank)
+        depth_sphere = self.depth_sphere.to(rank)
+        rays_o = self.rays_o.to(rank)
+        rays_d = self.rays_d.to(rank)
 
         if self.min_depth is None:
             min_depth = 1e-4 * torch.ones_like(rays_d[..., 0])

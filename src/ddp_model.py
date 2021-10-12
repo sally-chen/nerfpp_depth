@@ -3,13 +3,13 @@ import torch.nn as nn
 import numpy as np
 # import torch.nn.functional as F
 # import numpy as np
-from utils import TINY_NUMBER, HUGE_NUMBER
+from .utils import TINY_NUMBER, HUGE_NUMBER
 from collections import OrderedDict
-from nerf_network import Embedder, MLPNet, MLPNetClassier
+from .nerf_network import Embedder, MLPNet, MLPNetClassier
 import os
 import logging
 from pytorch3d.transforms import euler_angles_to_matrix
-from  helpers import check_shadow, check_shadow_aabb_inters
+from  .helpers import check_shadow, check_shadow_aabb_inters
 
 logger = logging.getLogger(__package__)
 

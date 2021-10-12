@@ -9,10 +9,10 @@ import os
 # from collections import OrderedDict
 # from ddp_model import NerfNet
 import time
-from data_loader_split import load_data_split, load_data_array
-from utils import mse2psnr, colorize_np, to8b
+from .data_loader_split import load_data_split, load_data_array
+from .utils import mse2psnr, colorize_np, to8b
 import imageio
-from ddp_train_nerf import config_parser, setup_logger, setup, cleanup, render_single_image, create_nerf
+from .ddp_train_nerf import config_parser, setup_logger, setup, cleanup, render_single_image, create_nerf
 import logging
 import random
 import pickle

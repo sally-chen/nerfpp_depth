@@ -11,7 +11,7 @@ import io
 import torch
 from scipy.spatial.transform import Rotation as R
 
-from utils import normalize_torch
+from .utils import normalize_torch
 from pytorch3d.transforms import euler_angles_to_matrix
 
 TINY_NUMBER = float(1e-6)
@@ -367,39 +367,39 @@ def get_box_transmittance_weight(box_loc, fg_z_vals, ray_d, ray_o, fg_depth,box_
 
 def check_shadow_aabb_inters(fg_pts, box_loc, box_sizes, box_rot, box_number):
     # box_rot in matrix form already, box_size original
-    from utils import HUGE_NUMBER
-    
+    from .utils import HUGE_NUMBER
+
     input_shpe = list(fg_pts.shape[:2])
     fg_pts = fg_pts.clone().reshape(-1, 3)
     box_loc = box_loc.clone().reshape(-1, box_number, 3)
     N_rays = fg_pts.shape[0]
     sun_location = torch.Tensor([0., 0., 99.999]).type_as(fg_pts).unsqueeze(0).expand(N_rays, -1)
-    
+
     assert box_loc.shape == (N_rays, box_number, 3)
     assert box_sizes.shape == (box_number, 3), 'box_sizes shape is wrong'
     assert box_rot.shape == (box_number, 3,3), 'box_rot shape is wrong'
-    
+
     # convert ray origin and ray end to box coordinate
     sun_location = sun_location.unsqueeze(-2).expand([N_rays, box_number, 3])  - box_loc
     fg_pts = fg_pts.unsqueeze(-2).expand([N_rays, box_number, 3]) - box_loc
-    
+
     # rotate to axis alighed box
     sun_location_rot = torch.matmul(torch.inverse(box_rot), sun_location.unsqueeze(-1)).squeeze(-1)
     fg_pts_rot = torch.matmul(torch.inverse(box_rot), fg_pts.unsqueeze(-1)).squeeze(-1)
-    
+
     # rayd
-    ray_d_norm_rot = (fg_pts_rot - sun_location_rot) / torch.norm(fg_pts_rot - sun_location_rot, dim =-1, keepdim=True) # normalize    
+    ray_d_norm_rot = (fg_pts_rot - sun_location_rot) / torch.norm(fg_pts_rot - sun_location_rot, dim =-1, keepdim=True) # normalize
     ray_d_frac = torch.zeros_like(ray_d_norm_rot)
     ray_d_frac[ray_d_norm_rot == 0.] = HUGE_NUMBER
     ray_d_frac[ray_d_norm_rot != 0.] = torch.div(1., ray_d_norm_rot[ray_d_norm_rot != 0.])
-    
+
     # get AABB bounds
     box_size = (box_sizes / 28.).type_as(box_loc).unsqueeze(0).expand(N_rays, box_number, 3)
     box_mins = torch.zeros_like(box_size) - box_size / 2  # N, N_b, 3
     box_maxs = torch.zeros_like(box_size) + box_size / 2  # N, N_b, 3
 
     box_mins_maxs = torch.stack([box_mins, box_maxs], dim=-1)
-    
+
     ts = (box_mins_maxs - sun_location_rot.unsqueeze(-1)) * ray_d_frac.unsqueeze(-1)
     t_mins = torch.min(ts, dim=-1)[0]
     t_maxs = torch.max(ts, dim=-1)[0]
@@ -442,7 +442,7 @@ def check_shadow(fg_pts, box_loc, box_sizes, box_rot, box_number):
     N_samples = 40
     multiplier = 10
     sun_location = torch.Tensor([0., 0., 0.999]).type_as(fg_pts).unsqueeze(0).expand(N_rays, -1)
-    
+
     assert box_loc.shape == (N_rays, box_number, 3)
     assert box_sizes.shape == (box_number, 3), 'box_sizes shape is wrong'
     assert box_rot.shape == (box_number, 3,3), 'box_rot shape is wrong'
