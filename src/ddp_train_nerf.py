@@ -1,8 +1,4 @@
 import os
-
-os.environ['CUDA_DEVICE_ORDER']= 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES']= '0'
-
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -133,10 +129,10 @@ def sample_pdf(bins, weights, N_samples, det=False):
     return samples
 
 
-def render_single_image(models, ray_sampler, chunk_size,
+def render_single_image(models, ray_sampler, chunk_size, box_props=None,
                         train_box_only=False, have_box=False,
-                        donerf_pretrain=False, box_number=10, box_size=1,
-                        front_sample=128, back_sample=128, box_props=None,
+                        donerf_pretrain=False, box_number=10,
+                        front_sample=128, back_sample=128, 
                         fg_bg_net=True, use_zval=True,loss_type='bce',rank=0, DEBUG=True):
     """
     Render an image using the NERF.
@@ -157,7 +153,9 @@ def render_single_image(models, ray_sampler, chunk_size,
 
     rays = ray_sampler.get_all_classifier(front_sample,
                                           back_sample,
-                                          pretrain=donerf_pretrain, rank=rank, train_box_only=train_box_only,                                         box_number=box_number)
+                                          pretrain=donerf_pretrain, rank=rank, 
+                                          train_box_only=train_box_only, 
+                                          box_number=box_number)
 
     chunks = (len(rays['ray_d']) + chunk_size - 1) // chunk_size
     rays_split = [OrderedDict() for _ in range(chunks)]

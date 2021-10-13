@@ -1110,7 +1110,7 @@ class NerfNetMoreBoxWithAutoExpo(nn.Module):
             self.autoexpo_params = nn.ParameterDict(
                 OrderedDict([(x, nn.Parameter(torch.Tensor([0.5, 0.]))) for x in self.img_names]))
 
-    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only=False, img_name=None):
+    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, box_props, query_box_only=False, img_name=None):
         '''
         :param ray_o, ray_d: [..., 3]
         :param fg_z_max: [...,]
@@ -1118,7 +1118,7 @@ class NerfNetMoreBoxWithAutoExpo(nn.Module):
         :param box_loc: [..., 3]
         :return
         '''
-        ret = self.nerf_net(ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, query_box_only)
+        ret = self.nerf_net(ray_o, ray_d, fg_z_max, fg_z_vals, bg_z_vals, box_loc, box_props, query_box_only)
 
         if img_name is not None:
             img_name = remap_name(img_name)

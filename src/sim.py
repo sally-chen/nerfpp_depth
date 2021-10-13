@@ -36,22 +36,21 @@ class Sim:
                               [  0., 380., 180.,   0.],
                               [  0.,   0.,   1.,   0.],
                               [  0.,   0.,   0.,   1.]]).type_as(x)
-
+        
         ray_samplers = load_data_array([intrs], [x], [cube_locs],
                                        self.h, self.w, False,
                                        True, not self.camera)
         cube_size = None
         time0 = time.time()
-        ret = render_single_image(self.models, ray_samplers[0],
-                                  self.args.chunk_size,
-                                  box_props=cube_props,
+        ret = render_single_image(self.models, ray_samplers[0], self.args.chunk_size,
+                                  box_props = cube_props,
+                                  train_box_only=self.args.train_box_only, 
                                   have_box=self.args.have_box,
+                                  donerf_pretrain=self.args.donerf_pretrain, 
                                   box_number=self.args.box_number,
-                                  train_box_only=self.args.train_box_only,
-                                  donerf_pretrain=self.args.donerf_pretrain,
-                                  front_sample=self.args.front_sample,
+                                  front_sample=self.args.front_sample, 
                                   back_sample=self.args.back_sample,
-                                  fg_bg_net=self.args.fg_bg_net,
+                                  fg_bg_net=self.args.fg_bg_net, 
                                   use_zval=self.args.use_zval)
         dt = time.time() - time0
         logger.info('Rendered {} in {} seconds'.format(0, dt))

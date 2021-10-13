@@ -47,7 +47,7 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True, lidar_image=
             max = torch.tensor([100., 140.]).type_as(pose)
             min = torch.tensor([85., 125.]).type_as(pose)
             avg_pose = torch.tensor([0.5, 0.5]).type_as(pose)
-            print(pose.shape, loc.shape)
+#             print(pose.shape, loc.shape)
 
             pose[:2, 3] = ((pose[:2, 3] - min ) / (max - min) - avg_pose ) * 0.5
             loc[:, :2] = ((loc[:, :2] - min ) / (max - min) - avg_pose ) * 0.5
