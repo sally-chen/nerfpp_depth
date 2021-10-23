@@ -131,9 +131,10 @@ def sample_pdf(bins, weights, N_samples, det=False):
 
 def render_single_image(models, ray_sampler, chunk_size, box_props=None,
                         train_box_only=False, have_box=False,
-                        donerf_pretrain=False, box_number=10,
-                        front_sample=128, back_sample=128, 
-                        fg_bg_net=True, use_zval=True,loss_type='bce',rank=0, DEBUG=True):
+                        donerf_pretrain=False, box_number=10, box_size=1,
+                        front_sample=128, back_sample=128,
+                        fg_bg_net=True, use_zval=True,loss_type='bce',rank=0,
+                        checkpoint=False, DEBUG=True):
     """
     Render an image using the NERF.
     :param models: Dictionary of networks used for the render.
@@ -153,8 +154,8 @@ def render_single_image(models, ray_sampler, chunk_size, box_props=None,
 
     rays = ray_sampler.get_all_classifier(front_sample,
                                           back_sample,
-                                          pretrain=donerf_pretrain, rank=rank, 
-                                          train_box_only=train_box_only, 
+                                          pretrain=donerf_pretrain, rank=rank,
+                                          train_box_only=train_box_only,
                                           box_number=box_number)
 
     chunks = (len(rays['ray_d']) + chunk_size - 1) // chunk_size
@@ -184,10 +185,14 @@ def render_single_image(models, ray_sampler, chunk_size, box_props=None,
 
 
     for k,_rays in enumerate(rays_split):
-
-        chunk_ret = render_rays(models, _rays, train_box_only, have_box,
-                                donerf_pretrain, front_sample, back_sample,
-                                fg_bg_net, use_zval, loss_type, box_number=box_number, box_props=box_props)
+        if checkpoint:
+            chunk_ret = torch.utils.checkpoint.checkpoint(render_rays, models, _rays, train_box_only,
+                                    have_box, donerf_pretrain, front_sample, back_sample,
+                                    fg_bg_net, use_zval, loss_type, box_number, box_props)
+        else:
+            chunk_ret = render_rays(models, _rays, train_box_only,
+                                    have_box, donerf_pretrain, front_sample, back_sample,
+                                    fg_bg_net, use_zval, loss_type, box_number, box_props)
 
 
         if donerf_pretrain:
@@ -324,7 +329,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
 
 
 def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
-                front_sample, back_sample, fg_bg_net, use_zval, loss_type, box_number, box_props=None):
+                front_sample, back_sample, fg_bg_net, use_zval, loss_type, box_number, box_props):
 
     """Render a set of rays using specific config."""
 

@@ -19,13 +19,14 @@ from scipy.spatial.transform import Rotation
 logger = logging.getLogger(__package__)
 
 class Sim:
-    def __init__(self, args, frame_height, frame_width, max_depth, camera):
+    def __init__(self, args, frame_height, frame_width, max_depth, camera, checkpoint=False):
         #setup(0, args.world_size)
         self.args = args
         self.start, self.models = create_nerf(0, args)
         self.h = frame_height
         self.w = frame_width
         self.camera = camera
+        self.checkpoint = checkpoint
 
 
 
@@ -36,7 +37,7 @@ class Sim:
                               [  0., 380., 180.,   0.],
                               [  0.,   0.,   1.,   0.],
                               [  0.,   0.,   0.,   1.]]).type_as(x)
-        
+
         ray_samplers = load_data_array([intrs], [x], [cube_locs],
                                        self.h, self.w, False,
                                        True, not self.camera)
@@ -44,14 +45,15 @@ class Sim:
         time0 = time.time()
         ret = render_single_image(self.models, ray_samplers[0], self.args.chunk_size,
                                   box_props = cube_props,
-                                  train_box_only=self.args.train_box_only, 
+                                  train_box_only=self.args.train_box_only,
                                   have_box=self.args.have_box,
-                                  donerf_pretrain=self.args.donerf_pretrain, 
+                                  donerf_pretrain=self.args.donerf_pretrain,
                                   box_number=self.args.box_number,
-                                  front_sample=self.args.front_sample, 
+                                  front_sample=self.args.front_sample,
                                   back_sample=self.args.back_sample,
-                                  fg_bg_net=self.args.fg_bg_net, 
-                                  use_zval=self.args.use_zval)
+                                  fg_bg_net=self.args.fg_bg_net,
+                                  use_zval=self.args.use_zval,
+                                  checkpoint=self.checkpoint)
         dt = time.time() - time0
         logger.info('Rendered {} in {} seconds'.format(0, dt))
 
@@ -148,7 +150,8 @@ def yaw_to_mat(yaws):
     return Rf
 
 
-def make_sim(config_path, frame_height, frame_width, depth=60., camera=False, box_num=6, chunk_size=-1):
+def make_sim(config_path, frame_height, frame_width, depth=60., camera=False,
+             box_num=6, chunk_size=-1, checkpoint=False):
     parser = config_parser()
     args = parser.parse_args("--config " + config_path)
     args.box_number = box_num
@@ -160,7 +163,7 @@ def make_sim(config_path, frame_height, frame_width, depth=60., camera=False, bo
         args.world_size = torch.cuda.device_count()
         logger.info('Using # gpus: {}'.format(args.world_size))
 
-    sim = Sim(args, frame_height, frame_width, depth, camera)
+    sim = Sim(args, frame_height, frame_width, depth, camera, checkpoint)
 
     return sim
 

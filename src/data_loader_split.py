@@ -359,3 +359,4 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     print("finished getting rays")
     print("[Number of image: {}]".format(count))
     return ray_samplers
+
