@@ -21,7 +21,7 @@ lrate_decay_steps = 5000
 
 ### CASCADE
 cascade_level = 1
-cascade_samples = 64
+cascade_samples = 16
 
 ### TESTING
 

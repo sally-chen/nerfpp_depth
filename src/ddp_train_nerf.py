@@ -134,7 +134,7 @@ def render_single_image(models, ray_sampler, chunk_size, box_props=None,
                         donerf_pretrain=False, box_number=10, box_size=1,
                         front_sample=128, back_sample=128,
                         fg_bg_net=True, use_zval=True,loss_type='bce',rank=0,
-                        checkpoint=False, DEBUG=True):
+                        checkpoint=False, DEBUG=False):
     """
     Render an image using the NERF.
     :param models: Dictionary of networks used for the render.
