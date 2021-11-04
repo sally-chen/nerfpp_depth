@@ -202,12 +202,13 @@ def render_single_image(models, ray_sampler, chunk_size, box_props=None,
 
         else:
 
-            likelis_fg.append(chunk_ret['likeli_fg'].cpu())
-            likelis_bg.append(chunk_ret['likeli_bg'].cpu())
-            rgbs.append(chunk_ret['rgb'].cpu())
-            depths.append(chunk_ret['depth_fgbg'].cpu())
+    
+            rgbs.append(chunk_ret['rgb'])
+            depths.append(chunk_ret['depth_fgbg'])
 
             if DEBUG:
+                likelis_fg.append(chunk_ret['likeli_fg'])
+                likelis_bg.append(chunk_ret['likeli_bg'])
                 rgbs_fg.append(chunk_ret['fg_rgb'])
                 depths_fg.append(chunk_ret['scene_weights'])
 
@@ -226,9 +227,6 @@ def render_single_image(models, ray_sampler, chunk_size, box_props=None,
     else:
         rgb = torch.cat(rgbs).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
         d = torch.cat(depths).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
-        likeli_fg = torch.cat(likelis_fg).view(ray_sampler.H * ray_sampler.W, -1).squeeze().cpu()
-        likeli_bg = torch.cat(likelis_bg).view(ray_sampler.H * ray_sampler.W, -1).squeeze().cpu()
-
 
         # likeli_fg_sig = torch.sigmoid(likeli_fg).numpy()
         # likeli_bg_sig = torch.sigmoid(likeli_bg).numpy()
@@ -246,12 +244,17 @@ def render_single_image(models, ray_sampler, chunk_size, box_props=None,
             others['rgb_bg'] = rgb_bg
             others['d_bg'] = d_bg
             others['d_lam'] = d_lam
+            
+            likeli_fg = torch.cat(likelis_fg).view(ray_sampler.H * ray_sampler.W, -1).squeeze()
+            likeli_bg = torch.cat(likelis_bg).view(ray_sampler.H * ray_sampler.W, -1).squeeze()
+
+
 
 
 
             return rgb, d, likeli_fg, likeli_bg, rays['cls_label'], others
 
-    return rgb, d, likeli_fg, likeli_bg, rays['cls_label'], None
+    return rgb, d, None, None, rays['cls_label'], None
 
 def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sample, have_box):
 
