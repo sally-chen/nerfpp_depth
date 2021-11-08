@@ -379,10 +379,10 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
 
 
-            box_weights = get_box_transmittance_weight(box_loc=box_loc,
+            box_weights = get_box_transmittance_weight(box_loc=box_loc.float(),
                                          fg_z_vals=fg_z_vals_centre,  ray_d=ray_d,
                                          ray_o=ray_o,
-                                         fg_depth=fg_far_depth, box_number=box_number, box_props=box_props)
+                                         fg_depth=fg_far_depth, box_number=box_number, box_props=box_props.float())
 
             ## resample from box_nerf
             # fg_weights = fg_weights + normalize_torch(box_weights)
@@ -411,7 +411,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 #             print('bg_depth', bg_depth.type())
 #             print('box_loc', box_loc.type())
 #             print('box_props', box_props.type())
-            ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc, box_props)
+            ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc.float(), box_props.float())
 
 
         # fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
@@ -574,8 +574,8 @@ def create_nerf(rank, args):
             for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
                  models[name].load_state_dict(to_load[name])
                     
-        models['net_oracle'] = models['net_oracle'].double()
-        models['net_0'] = models['net_0'].double()
+#         models['net_oracle'] = models['net_oracle'].double()
+#         models['net_0'] = models['net_0'].double()
         ####################################################################################333
          #### tmp for reloading pretrained model`
         # fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/sceneonly/model_425000.pth"
