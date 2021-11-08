@@ -725,7 +725,7 @@ class NerfNetMoreBox(nn.Module):
 
         r = euler_angles_to_matrix(torch.deg2rad(torch.cat([box_rot[:,2:],-1*box_rot[:,1:2], -1*box_rot[:,0:1] ], 
                                                            dim=-1)), convention='ZYX')
-        r_mat_expand = r.unsqueeze(0).unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3, 3]).float()
+        r_mat_expand = r.unsqueeze(0).unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3, 3])
 
         box_offset = ((torch.matmul(torch.inverse(r_mat_expand) ,
                         (fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
@@ -741,7 +741,7 @@ class NerfNetMoreBox(nn.Module):
 
         assert input_box.shape == (dots_sh[0]*self.box_number, N_samples, self.fg_embedder_position_box.out_dim + self.fg_embedder_viewdir_box.out_dim)
 
-        fg_box_raw = self.box_net(input_box.float())  # (N, *)
+        fg_box_raw = self.box_net(input_box)  # (N, *)
         fg_box_raw_sigma = fg_box_raw['sigma'].view(dots_sh[0], self.box_number, N_samples)
         
 #         print(fg_box_raw_sigma.view(32,100, self.box_number, N_samples)[2,50,...])
@@ -749,7 +749,7 @@ class NerfNetMoreBox(nn.Module):
         colors = colors.unsqueeze(0).unsqueeze(-2).expand(dots_sh[0], -1, N_samples, 3)
         fg_box_raw_rgb = fg_box_raw['rgb'].view(dots_sh[0], self.box_number, N_samples, 3) * colors
 
-
+        # use sigmoid to filter sigma in empty space
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
         inside_box = 0.5 / 28. - abs_dist
         weights = torch.prod(torch.sigmoid(inside_box * 10000.), dim=-1)        
@@ -818,7 +818,9 @@ class NerfNetMoreBox(nn.Module):
 
         depth_map = fg_depth_map + bg_depth_map
         rgb_map = fg_rgb_map + bg_rgb_map
- 
+        
+#         print('depth_map', depth_map.type())
+#         print('rgb_map', rgb_map.type())
         ret = OrderedDict([('rgb', rgb_map),  # loss
                            ('fg_weights', fg_weights),  # importance sampling
                            ('bg_weights', bg_weights),  # importance sampling

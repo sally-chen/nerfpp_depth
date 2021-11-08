@@ -28,6 +28,8 @@ def find_files(dir, exts):
         return []
 
 def load_data_array(intrs, poses, locs, H, W, plot, normalize=True, lidar_image=True):
+    
+#     print('use lidar image: {}'.format(lidar_image))
 
     if plot:
         dummy_pose_loc = np.zeros((np.stack(poses, axis=0).shape))

@@ -190,6 +190,7 @@ def render_single_image(models, ray_sampler, chunk_size, box_props=None,
                                     have_box, donerf_pretrain, front_sample, back_sample,
                                     fg_bg_net, use_zval, loss_type, box_number, box_props)
         else:
+           
             chunk_ret = render_rays(models, _rays, train_box_only,
                                     have_box, donerf_pretrain, front_sample, back_sample,
                                     fg_bg_net, use_zval, loss_type, box_number, box_props)
@@ -351,6 +352,8 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
     bg_z_vals_centre = rays['bg_z_vals_centre']
     use_label = False
+    
+ 
 
 
     ret_or = eval_oracle(rays, net_oracle, fg_bg_net, use_zval, front_sample, back_sample, have_box)
@@ -401,7 +404,14 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
 
         else:
-            ret = net(ray_o.float(), ray_d.float(), fg_far_depth.float(), fg_depth.float(), bg_depth.float(), box_loc.float(), box_props.float())
+#             print('ray_o', ray_o.type())
+#             print('ray_d', ray_d.type())
+#             print('fg_far_depth', fg_far_depth.type())
+#             print('fg_depth', fg_depth.type())
+#             print('bg_depth', bg_depth.type())
+#             print('box_loc', box_loc.type())
+#             print('box_props', box_props.type())
+            ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc, box_props)
 
 
         # fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
@@ -507,11 +517,11 @@ def create_nerf(rank, args):
 
         netscene = WrapperModule(NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank))
     else:
-        ora_net = DepthOracle(args).to(rank)
+        ora_net = DepthOracle(args).to(rank).double()
         models['net_oracle'] = WrapperModule(ora_net)
         optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
         models['optim_oracle'] = optim
-        net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+        net = NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank).double()
 
 
     optim = torch.optim.Adam(net.parameters(), lr=args.lrate)
@@ -563,6 +573,9 @@ def create_nerf(rank, args):
         for m in range(models['cascade_level']):
             for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
                  models[name].load_state_dict(to_load[name])
+                    
+        models['net_oracle'] = models['net_oracle'].double()
+        models['net_0'] = models['net_0'].double()
         ####################################################################################333
          #### tmp for reloading pretrained model`
         # fpath_sc = "/media/diskstation/sally/donerf/logs/pretrained/sceneonly/model_425000.pth"
@@ -658,7 +671,7 @@ def create_nerf(rank, args):
 
 
         models['optim_oracle'].load_state_dict(to_load_sc_ora['optim_oracle'])
-        models['net_oracle'].load_state_dict(to_load_sc_ora['net_oracle'])
+        models['net_oracle'].load_state_dict(to_load_sc_ora['net_oracle']).double()
 
 
 
@@ -690,7 +703,7 @@ def create_nerf(rank, args):
         #
         # print(model_dict_old)
 
-        models['net_0'].load_state_dict(model_dict_new)
+        models['net_0'].load_state_dict(model_dict_new).double()
 
         ## ---------------new--------------- ##
 

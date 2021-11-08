@@ -131,8 +131,8 @@ def get_rays_single_image(H, W, intrinsics, c2w):
     return rays_o, rays_d, depth
 
 def get_rays_scan(H, W, c2w):
-    phi = np.linspace(-np.pi, np.pi, W).astype(dtype=np.float32)
-    theta = np.linspace(-np.pi/4, np.pi/4, H,).astype(dtype=np.float32)
+    phi = np.linspace(-np.pi, np.pi, W).astype(dtype=np.float64)
+    theta = np.linspace(-np.pi/4, np.pi/4, H,).astype(dtype=np.float64)
 
     pv, tv = np.meshgrid(phi, theta)
     x = np.sin(pv) * np.cos(tv)
@@ -146,7 +146,11 @@ def get_rays_scan(H, W, c2w):
     rays_o = rays_o.expand(rays_d.shape[0], -1)
 
     depth = torch.inverse(c2w)[2, 3]
-    depth = depth * torch.ones((rays_o.shape[0],)).to(c2w.device)  # (H*W,)
+    depth = depth * torch.ones((rays_o.shape[0],), dtype=torch.float64).to(c2w.device)  # (H*W,)
+    
+#     print('rays_o',rays_o.type())
+#     print('rays_d',rays_d.type())
+#     print('depth',depth.type())
 
     return rays_o, rays_d, depth
 

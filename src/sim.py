@@ -32,12 +32,15 @@ class Sim:
 
 #    @torch.no_grad()
     def run(self, x, cube_locs, cube_props, max_depth=60, rgb=False):
+        
+#         print('pose',x.type())
+#         print('loc',cube_locs.type())
 
         intrs = torch.tensor([[380.,   0., 320.,   0.],
                               [  0., 380., 180.,   0.],
                               [  0.,   0.,   1.,   0.],
                               [  0.,   0.,   0.,   1.]]).type_as(x)
-
+        
         ray_samplers = load_data_array([intrs], [x], [cube_locs],
                                        self.h, self.w, False,
                                        True, not self.camera)
