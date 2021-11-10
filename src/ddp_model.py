@@ -730,7 +730,7 @@ class NerfNetMoreBox(nn.Module):
         box_offset = ((torch.matmul(torch.inverse(r_mat_expand) ,
                         (fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
                         - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])).unsqueeze(-1)).squeeze(-1))/
-                      box_sizes.unsqueeze(0).unsqueeze(0))\
+                      (box_sizes*30.).unsqueeze(0).unsqueeze(0))\
             .permute(0,2,1,3).reshape(dots_sh[0]*self.box_number, N_samples, 3)
 
 

@@ -297,8 +297,9 @@ def get_box_transmittance_weight(box_loc, fg_z_vals, ray_d, ray_o, fg_depth,box_
     fg_pts = fg_pts.unsqueeze(-2).expand(N_rays + [N_samples, box_number, 3])
 
 
-    box_size = (box_sizes/26.).type_as(box_loc).unsqueeze(0).expand(N_rays + [box_number, 3])
+    #box_size = (box_sizes/26.).type_as(box_loc).unsqueeze(0).expand(N_rays + [box_number, 3])#bf moving normalization out
 
+    box_size = (box_sizes*30./26.).type_as(box_loc).unsqueeze(0).expand(N_rays + [box_number, 3])
     assert box_size.shape == (N_rays[0], box_number, 3)
 
     offset = (fg_pts - box_loc.unsqueeze(1).expand(-1,N_samples,-1,-1)).unsqueeze(-1).float()
