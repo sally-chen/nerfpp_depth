@@ -378,7 +378,7 @@ def check_shadow_aabb_inters(fg_pts, box_loc, box_sizes, box_rot, box_number):
     ray_d_frac[ray_d_norm_rot != 0.] = torch.div(1., ray_d_norm_rot[ray_d_norm_rot != 0.])
 
     # get AABB bounds
-    box_size = (box_sizes / 28.).type_as(box_loc).unsqueeze(0).expand(N_rays, box_number, 3)
+    box_size = (box_sizes*30. / 28.).type_as(box_loc).unsqueeze(0).expand(N_rays, box_number, 3)
     box_mins = torch.zeros_like(box_size) - box_size / 2  # N, N_b, 3
     box_maxs = torch.zeros_like(box_size) + box_size / 2  # N, N_b, 3
 
