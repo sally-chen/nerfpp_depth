@@ -640,6 +640,33 @@ class NerfNetBox(nn.Module):
                            ('depth_fgbg', depth_map*30.)])
         return ret
 
+def bdot(x, y, alpha = 1):
+    return  (x * y * alpha).sum(dim=-1)
+
+def box_density(points, view, sharpness=10):
+    N = points.shape[0]
+    S = points.shape[1]
+    points = points.view(-1, 3)
+    view = view.reshape(-1, 3)
+    ret = {}
+    d = torch.norm(points, p=sharpness, dim=-1)
+
+    #normal_abs = torch.nn.functional.one_hot(torch.argmax(points.abs(), dim=-1), num_classes=3)
+    normal_abs = torch.nn.functional.softmax(1000*points.abs(), dim=-1)
+    normal = normal_abs * bdot(normal_abs, points)[..., None]
+    normal /= normal.norm(dim=-1)[..., None]
+
+    normal = points / points.norm(dim=-1)[..., None]
+
+
+    sigma = 1000 / (10. - d).clamp(min=0)
+    cos_view_normal = bdot(-view, normal).clamp(min=0)
+
+
+    ret['sigma'] = sigma.view(N, S, 1)
+    ret['rgb'] = cos_view_normal.view(N, S, 1) * torch.ones(N, S, 3).type_as(points)
+
+    return ret
 
 
 
@@ -723,7 +750,7 @@ class NerfNetMoreBox(nn.Module):
         fg_box_raw_lst = []
         self.box_net = self.box_net.to(torch.cuda.current_device())
 
-        r = euler_angles_to_matrix(torch.deg2rad(torch.cat([box_rot[:,2:],-1*box_rot[:,1:2], -1*box_rot[:,0:1] ], 
+        r = euler_angles_to_matrix(torch.deg2rad(torch.cat([box_rot[:,2:],-1*box_rot[:,1:2], -1*box_rot[:,0:1] ],
                                                            dim=-1)), convention='ZYX')
         r_mat_expand = r.unsqueeze(0).unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3, 3])
 
@@ -741,9 +768,14 @@ class NerfNetMoreBox(nn.Module):
 
         assert input_box.shape == (dots_sh[0]*self.box_number, N_samples, self.fg_embedder_position_box.out_dim + self.fg_embedder_viewdir_box.out_dim)
 
-        fg_box_raw = self.box_net(input_box)  # (N, *)
+        __concrete = box_density(box_offset, expanded_viewdir_reshape)
+        fg_box_raw = self.box_net(input_box.float())  # (N, *)
+
+        #fg_box_raw = __concrete
         fg_box_raw_sigma = fg_box_raw['sigma'].view(dots_sh[0], self.box_number, N_samples)
-        
+
+
+
 #         print(fg_box_raw_sigma.view(32,100, self.box_number, N_samples)[2,50,...])
 
         colors = colors.unsqueeze(0).unsqueeze(-2).expand(dots_sh[0], -1, N_samples, 3)
@@ -752,15 +784,15 @@ class NerfNetMoreBox(nn.Module):
         # use sigmoid to filter sigma in empty space
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
         inside_box = 0.5 / 28. - abs_dist
-        weights = torch.prod(torch.sigmoid(inside_box * 10000.), dim=-1)        
+        weights = torch.prod(torch.sigmoid(inside_box * 10000.), dim=-1)
         fg_box_raw_sigma *= weights
 
 
         input = torch.cat((self.fg_embedder_position(fg_pts),
                            self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
         fg_raw = self.fg_net(input)
-        
-        
+
+
         fg_raw['rgb'] = fg_raw['rgb'] * check_shadow_aabb_inters(
             fg_pts, box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3]), box_sizes, r, self.box_number)
 
@@ -784,7 +816,7 @@ class NerfNetMoreBox(nn.Module):
 
         fg_rgb_map = torch.sum(fg_weights.unsqueeze(-1) * fg_rgb, dim=-2)  # [..., 3]
         fg_depth_map = torch.sum(fg_weights * fg_z_vals, dim=-1)  # [...,]
-   
+
         # render background
         N_samples = bg_z_vals.shape[-1]
         bg_ray_o = ray_o.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
@@ -808,7 +840,7 @@ class NerfNetMoreBox(nn.Module):
         T = torch.cat((torch.ones_like(T[..., 0:1]), T), dim=-1)  # [..., N_samples]
         bg_weights = bg_alpha * T  # [..., N_samples]
         bg_rgb_map = torch.sum(bg_weights.unsqueeze(-1) * bg_raw['rgb'], dim=-2)  # [..., 3]
-        bg_depth_map = torch.sum(bg_weights * bg_z_vals, dim=-1)  
+        bg_depth_map = torch.sum(bg_weights * bg_z_vals, dim=-1)
 
         # composite foreground and background
         bg_rgb_map = bg_lambda.unsqueeze(-1) * bg_rgb_map
@@ -818,7 +850,7 @@ class NerfNetMoreBox(nn.Module):
 
         depth_map = fg_depth_map + bg_depth_map
         rgb_map = fg_rgb_map + bg_rgb_map
-        
+
 #         print('depth_map', depth_map.type())
 #         print('rgb_map', rgb_map.type())
         ret = OrderedDict([('rgb', rgb_map),  # loss
@@ -832,7 +864,7 @@ class NerfNetMoreBox(nn.Module):
                            ('depth_fgbg', depth_map*30.)])
 #                            ('box_weights', torch.sum(fg_weights_boxes, dim=-1)),
 #                            ('scene_weights', torch.sum(fg_weights_scene, dim=-1)),
-                           
+
         return ret
 
 
