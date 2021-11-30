@@ -295,7 +295,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
         # box_norm_test = normalize_torch(box_weights).cpu().numpy()
         fg_weights = fg_weights + box_weights
 
-    fg_weights[fg_z_vals_centre < 0.0002] = float(0.0)
+    fg_weights[fg_z_vals_centre < 0.000002] = float(0.0)
 
     fg_depth_mid = 0.5 * (fg_z_vals_centre[:, 1:] + fg_z_vals_centre[:, :-1])
     bg_depth_mid = 0.5 * (bg_z_vals_centre[:, 1:] + bg_z_vals_centre[:, :-1])
@@ -305,7 +305,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
 
 
     fg_depth = fg_depth.clone()
-    fg_depth[fg_depth<0.0002] = float(0.0002)
+    fg_depth[fg_depth<0.000002] = float(0.000002)
 
     # fg_depth_np = fg_depth.cpu().numpy()
 
@@ -610,9 +610,8 @@ def create_nerf(rank, args):
         #
         # models['net_0'].load_state_dict(to_load_dep['net_0'])
 
-
-
-
+        
+    
     elif args.have_box:
 
         map_location = 'cuda:%d' % rank
@@ -630,13 +629,18 @@ def create_nerf(rank, args):
         # fpath_sc = '/media/diskstation/sally/pretrained/big_inters_norm15_sceneonly/model_425000.pth'
 
         ## ---------------new--------------- ##
-        fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
+#         fpath_comb = '/media/diskstation/sally/pretrained/big_inters_norm15_comb_correct/model_420000.pth'
+        fpath_comb = '/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth'
+        
+        
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9_rgb/model_275000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/box_sample192_rgb64_huri_fromtrained/model_490000.pth"
         fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/box_sample192_rgb64_boxcorrect/model_725000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs/scene_nobox_set2_fr192_K9Z5//model_575000.pth"
         # fpath_depth_ora = "/home/sally/nerf_clone/nerfpp_depth/logs//box_oracle/model_995000.pth"
-        fpath_depth_scene = "/home/sally/nerf_clone/nerfpp_depth/logs/scene_nobox_set2_fr192_K9Z5//model_970000.pth"
+        
+#         fpath_depth_scene = "/home/sally/nerf_clone/nerfpp_depth/logs/scene_nobox_set2_fr192_K9Z5//model_970000.pth"
+        fpath_depth_scene = "/home/sally/nerf_clone/nerfpp_depth/logs/seg_test_filt9/model_565000.pth"
 
 
         # models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
@@ -671,11 +675,14 @@ def create_nerf(rank, args):
 
         # for load weights without box
 
-        model_dict_old = netscene.state_dict()
+        model_dict_old = netscene.state_dict() # this is background only 
         model_dict_new = models['net_0'].state_dict()
+        
+        for k in model_dict_new.keys():
+            model_dict_new[k] = to_load_dep['net_0'][k] #to_load_dep['net_0'][k]
 
         for k in model_dict_old.keys():
-            model_dict_new[k] = to_load_dep['net_0'][k]
+            model_dict_new[k] = to_load_comb['net_0'][k] #to_load_dep['net_0'][k]
 
 
         # model_dict = {k: v  for k,v in to_load_dep['net_0'].items() if k in model_dict_old  }

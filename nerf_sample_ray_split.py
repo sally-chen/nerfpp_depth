@@ -327,7 +327,7 @@ class RaySamplerSingleImage(object):
         if self.min_depth is not None:
             min_depth = self.min_depth
         else:
-            min_depth = 1e-4 * np.ones_like(self.rays_d[..., 0])
+            min_depth = 1e-7 * np.ones_like(self.rays_d[..., 0])
 
         if self.box_loc is None:
             box_loc = None
@@ -373,7 +373,7 @@ class RaySamplerSingleImage(object):
         if self.min_depth is not None:
             min_depth = self.min_depth
         else:
-            min_depth = 1e-4 * torch.ones_like(torch.from_numpy(self.rays_d[..., 0])).to(rank)
+            min_depth = 1e-7 * torch.ones_like(torch.from_numpy(self.rays_d[..., 0])).to(rank)
 
         if self.box_loc is None:
             box_loc = None
@@ -432,7 +432,7 @@ class RaySamplerSingleImage(object):
             fg_near_depth = fg_far_depth - 2. * ray_d_cos
         else:
 
-            fg_near_depth = torch.from_numpy(1e-4 * np.ones_like(self.rays_d[..., 0])).to(rank)
+            fg_near_depth = torch.from_numpy(1e-7 * np.ones_like(self.rays_d[..., 0])).to(rank)
 
         step = (fg_far_depth - fg_near_depth) / (
                 N_front_sample - 1)  # fg step size  --> will make this constant eventually [H*W]

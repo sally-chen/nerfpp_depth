@@ -25,24 +25,46 @@ def find_files(dir, exts):
     else:
         return []
 
-def gen_box_locs(count=55, box_number=10):
-    # loc = np.linspace((87,132),(90,135),35)
 
-    # loc = np.concatenate((np.random.uniform(87., 90., (count,1)),
-    #                       np.random.uniform(132., 135., (count,1))), axis=1)
+def box_loc_from_txt(count=50, box_number=10):
 
-    ct1 = 30
-    ct2 = 20
-    np.random.seed(123)
-    loc1 = np.concatenate((np.random.uniform(81., 89., (ct1, box_number, 1)),
-                            np.random.uniform(110., 120., (ct1, box_number, 1)),
-                          np.random.uniform(-0.09, 0.02, (ct1,box_number, 1))), axis=-1)
-
-    loc2 = np.concatenate((np.random.uniform(90., 98., (ct2, box_number, 1)),
-                            np.random.uniform(111., 118., (ct2, box_number, 1)),
-                          np.random.uniform(-0.09, 0.02, (ct2, box_number,1))), axis=-1)
-
-    loc = np.concatenate([loc1,loc2], axis=0)
+    box_props = np.array([ 98.863   ,125.34992 ,  1.786512,  0.124561,  0.09506 ,  0.674434,
+   1.608457,  1.38573 ,  1.159217, -0.367203,-19.261133,-22.64998 ,
+  98.611984,120.35097 ,  0.978648,  0.719407,  0.964313,  0.016076,
+   1.24886 ,  1.331308,  1.186513, 15.027966, 22.126894, -3.96351 ,
+  97.05769 ,118.040504,  0.769688,  0.36452 ,  0.205555,  0.309259,
+   1.725814,  1.899079,  1.26358 , 19.352983,-24.408157,  8.496014,
+  98.77501 ,127.32707 ,  1.734848,  0.817463,  0.635946,  0.996193,
+   1.221624,  1.678531,  1.458348, 12.843408, -4.735205,  1.275918,
+  95.58389 ,117.241104,  3.840275,  0.193399,  0.765102,  0.537566,
+   1.083747,  1.065293,  1.087662, -4.203038, -0.571052, -0.551875,
+  95.00536 ,116.738266,  4.399919,  0.526893,  0.237533,  0.266745,
+   1.0818  ,  1.064159,  1.049099,  4.072644, -3.405717,  0.020287,
+  93.59534 ,119.71914 ,  3.515487,  0.277713,  0.040806,  0.807433,
+   1.079355,  1.051508,  1.058991,  1.367564, -0.676404, -1.146593,
+  93.673836,116.66906 ,  4.207787,  0.985084,  0.992383,  0.368961,
+   1.027816,  1.055402,  1.031426,  3.248581,  4.195982,  2.043893,
+  94.189674,117.064445,  3.570103,  0.84365 ,  0.545266,  0.621931,
+   1.065653,  1.056373,  1.000977, -2.784878, -3.016634, -0.614177,
+  93.93175 ,119.01718 ,  4.366326,  0.422892,  0.477283,  0.398576,
+   1.007378,  1.027783,  1.037599, -2.991591,  1.11616 ,  3.839408,
+  94.66836 ,117.84271 ,  4.229572,  0.489019,  0.488361,  0.643265,
+   1.07982 ,  1.084895,  1.082835, -1.061113,  2.840016, -0.463086,
+  87.796974,128.67583 ,  0.620225,  0.425344,  0.945928,  0.720886,
+   1.449482,  1.276958,  1.000375,  5.72198 ,-20.893444,-11.427114,
+  87.818924,116.68828 ,  1.553515,  0.68468 ,  0.492555,  0.546187,
+   1.865345,  1.74898 ,  1.248352,-14.865788, -0.147108, -6.17542 ,
+  87.53005 ,117.04619 ,  0.828899,  0.390882,  0.267236,  0.998679,
+   1.023151,  1.51043 ,  1.467531, -6.659768,-21.50057 ,-27.167158,
+  88.979614,125.16991 ,  1.159713,  0.671381,  0.297712,  0.436971,
+   1.850786,  1.575423,  1.508775, 21.700033, 19.290792,-27.110655]).reshape([15,12])
+    loc = box_props[:,:3]
+    
+ 
+    props = box_props[:,3:]
+    props[:,3:6] /= 2
+    loc[:,2] -=2.5
+    loc[:,0] -=5.
 
     max = np.array([100., 140., 2.8])
     min = np.array([85., 125., 2.8])
@@ -53,7 +75,53 @@ def gen_box_locs(count=55, box_number=10):
     # print(loc)![](logs/box_sample192_rgb64_6box_transm25-m10/render_test_525000/000008.png)
     loc[...,:2] -= avg_pos[:2]
     loc[...,:2] *= 0.5
+    z_box_scene = 1.
+    z_cam_scene = 2.8
 
+
+
+    loc[:, 2:] = (loc[:, 2:] - z_cam_scene) / 30.
+    
+    return loc,props
+
+def gen_box_locs(count=55, box_number=10):
+    # loc = np.linspace((87,132),(90,135),35)
+
+    # loc = np.concatenate((np.random.uniform(87., 90., (count,1)),
+    #                       np.random.uniform(132., 135., (count,1))), axis=1)
+
+    ct = 50
+    np.random.seed(123)
+    loc1 = np.concatenate((np.random.uniform(80.0, 81.0, (ct, 1, 1)),
+                            np.random.uniform(112., 113., (ct, 1, 1)),
+                          np.random.uniform(2.45, 2.5, (ct,1, 1))), axis=-1)
+
+    loc2 = np.concatenate((np.random.uniform(92.0, 93.0, (ct, 1, 1)),
+                            np.random.uniform(119., 120., (ct, 1, 1)),
+                          np.random.uniform(5.5, 5.55, (ct,1, 1))), axis=-1)
+    
+    loc3 = np.concatenate((np.random.uniform(100.0, 101.0, (ct, 1, 1)),
+                            np.random.uniform(112., 113., (ct, 1, 1)),
+                          np.random.uniform(2.45, 2.5, (ct,1, 1))), axis=-1)
+
+    loc = np.concatenate([loc1,loc2, loc3], axis=1)
+
+    max = np.array([100., 140., 2.8])
+    min = np.array([85., 125., 2.8])
+    max_minus_min = max-min
+    avg_pos = np.array([0.5, 0.5, 0.0])
+    loc[...,:2] -= min[:2]
+    loc[...,:2] /= (max_minus_min)[:2]
+    # print(loc)![](logs/box_sample192_rgb64_6box_transm25-m10/render_test_525000/000008.png)
+    loc[...,:2] -= avg_pos[:2]
+    loc[...,:2] *= 0.5
+    
+#     z_box_scene = 1.
+    z_cam_scene = 2.8
+
+#     z_box_normed = (z_box_scene - z_cam_scene) / 30.
+
+    loc[...,2]  = (loc[...,2] - z_cam_scene) / 30.
     # loc = np.concatenate((loc, -0.06 * np.ones((count,box_number,1))), axis=-1)
     # loc = np.concatenate((loc, -1. * np.ones((count,box_number,1))), axis=-1)
 
@@ -67,28 +135,31 @@ def parse_cube_loc(input):
     return nums_new.astype(np.float32)
 
 def gen_poses():
+
+
     # xy1 = np.linspace((120,128),(92,128),80)
-    xy1 = np.linspace((105,128),(92,128),5)
-    dg1 = (np.ones((5, )) * 180.) * math.pi / 180.
+    xy1 = np.linspace((105,128),(92,128),3)
+    dg1 = (np.ones((3, )) * 180.) * math.pi / 180.
 
     turn1 = np.linspace((92,128),(92,128),5)
     turn1_dg = (np.arange(180.0, 270.0, 18) + np.random.uniform(low=-1.0, high=1.0, size=(5,))) * math.pi / 180.
 
-    xy2 = np.linspace((92,128),(92,108),10)
-    dg2 = (np.ones((10,)) * 270.) * math.pi / 180.
+    xy2 = np.linspace((92.4,128),(90,111),10)
+    #xy2 = np.linspace((92,122.5),(92,119.5),16)
+    dg2 = (np.ones((10,)) * 270. +  np.random.uniform(-5., 5., (10,  ))) * math.pi  / 180.
 
-    turn2 = np.linspace((92,108),(92,108),5)
-    turn2_dg = (np.arange(270.0, 180.0, -18) + np.random.uniform(low=-1.0, high=1.0, size=(5,))) * math.pi / 180.
+    # turn2 = np.linspace((92,108),(92,108),2)
+    # turn2_dg = (np.arange(270.0, 180.0, -18) + np.random.uniform(low=-1.0, high=1.0, size=(5,))) * math.pi / 180.
 
-    xy3 = np.linspace((92,108),(91,108),5)
-    dg3 = (np.ones((10,)) * 180.) * math.pi / 180.
+    # xy3 = np.linspace((92,108),(91,108),5)
+    # dg3 = (np.ones((10,)) * 180.) * math.pi / 180.
 
-    turn3 = np.linspace((91,108),(91,108),5)
+    turn3 = np.linspace((92.4,112),(92.4,112),5)
     turn3_dg = (np.arange(180.0, 90, -18) + np.random.uniform(low=-1.0, high=1.0, size=(5,))) * math.pi / 180.
 
 
-    xy4 = np.linspace((91,108),(91,135),15)
-    dg4 = (np.ones((10,)) * 90.) * math.pi / 180.
+    xy4 = np.linspace((92.4,112),(92.4,128),27)
+    dg4 = (np.ones((27,)) * 90. + np.random.uniform(-5., 5., (27,  )) ) * math.pi / 180.
     # turn4 = np.linspace((87,135),(87,135),10)
     # turn4_dg = (np.arange(90.0, 0.0, -9) + np.random.uniform(low=-1.0, high=1.0, size=(10,))) * math.pi / 180.
 
@@ -96,97 +167,8 @@ def gen_poses():
     # xy5 = np.linspace((87,135),(120,135),80)
     # dg5 = (np.ones((80,)) * 0.) * math.pi / 180.
 
-    return np.concatenate((xy1, turn1, xy2, turn2, xy3, turn3, xy4), axis=0), np.concatenate((dg1, turn1_dg, dg2, turn2_dg, dg3, turn3_dg, dg4), axis=0)
+    return np.concatenate((xy1, turn1, xy2, turn3, xy4), axis=0), np.concatenate((dg1, turn1_dg, dg2, turn3_dg, dg4), axis=0)
 
-def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False):
-
-    def parse_txt(filename):
-        assert os.path.isfile(filename)
-        nums = open(filename).read().split()
-        return np.array([float(x) for x in nums]).reshape([4, 4]).astype(np.float32)
-
-    def parse_txt_loc(filename):
-        assert os.path.isfile(filename)
-        nums = open(filename).read().split()
-        return np.array([float(x) for x in nums]).reshape([1, 2]).astype(np.float32)
-
-    if basedir[-1] == '/':          # remove trailing '/'
-        basedir = basedir[:-1]
-     
-    split_dir = '{}/{}/{}'.format(basedir, scene, split)
-
-    if only_img_files:
-        img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg'])
-        return img_files
-
-    # camera parameters files
-    intrinsics_files = find_files('{}/intrinsics'.format(split_dir), exts=['*.txt'])
-    pose_files = find_files('{}/pose'.format(split_dir), exts=['*.txt'])
-    loc_files = find_files('{}/loc'.format(split_dir), exts=['*.txt'])
-    logger.info('raw intrinsics_files: {}'.format(len(intrinsics_files)))
-    logger.info('raw pose_files: {}'.format(len(pose_files)))
-
-    intrinsics_files = intrinsics_files[::skip]
-    pose_files = pose_files[::skip]
-    loc_files = loc_files[::skip]
-    cam_cnt = len(pose_files)
-
-    # img files
-    img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg'])
-    if len(img_files) > 0:
-        logger.info('raw img_files: {}'.format(len(img_files)))
-        img_files = img_files[::skip]
-        assert(len(img_files) == cam_cnt)
-    else:
-        img_files = [None, ] * cam_cnt
-
-    # mask files
-    mask_files = find_files('{}/mask'.format(split_dir), exts=['*.png', '*.jpg'])
-    if len(mask_files) > 0:
-        logger.info('raw mask_files: {}'.format(len(mask_files)))
-        mask_files = mask_files[::skip]
-        assert(len(mask_files) == cam_cnt)
-    else:
-        mask_files = [None, ] * cam_cnt
-
-    # min depth files
-    mindepth_files = find_files('{}/min_depth'.format(split_dir), exts=['*.png', '*.jpg'])
-    if try_load_min_depth and len(mindepth_files) > 0:
-        logger.info('raw mindepth_files: {}'.format(len(mindepth_files)))
-        mindepth_files = mindepth_files[::skip]
-        assert(len(mindepth_files) == cam_cnt)
-    else:
-        mindepth_files = [None, ] * cam_cnt
-
-    # assume all images have the same size as training image
-    train_imgfile = find_files('{}/{}/train/rgb'.format(basedir, scene), exts=['*.png', '*.jpg'])[0]
-    train_im = imageio.imread(train_imgfile)
-    H, W = train_im.shape[:2]
-
-    # create ray samplers
-    ray_samplers = []
-    for i in range(cam_cnt):
-        intrinsics = parse_txt(intrinsics_files[i])
-        pose = parse_txt(pose_files[i])
-        loc = parse_txt_loc(loc_files[i])
-        # print(loc)
-
-        # read max depth
-        try:
-            max_depth = float(open('{}/max_depth.txt'.format(split_dir)).readline().strip())
-        except:
-            max_depth = None
-        # print("LOC IS")
-        # print(loc)
-        ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose, box_loc=loc,
-                                                  img_path=img_files[i],
-                                                  mask_path=mask_files[i],
-                                                  min_depth_path=mindepth_files[i],
-                                                  max_depth=max_depth))
-
-    logger.info('Split {}, # views: {}'.format(split, cam_cnt))
-
-    return ray_samplers
 
 def load_pose_data(basedir):
     from scipy.spatial.transform import Rotation as R
@@ -250,129 +232,37 @@ def load_pose_data(basedir):
 
 def load_data_split_video(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False,
                           train_seg=False, train_depth=False, have_box=True, box_number=10,  box_props_path='' ):
-    def parse_txt(filename):
-        assert os.path.isfile(filename)
-        nums = open(filename).read().split()
-        return np.array([float(x) for x in nums]).reshape([4, 4]).astype(np.float32)
-
-    def parse_txt_loc(filename):
-        assert os.path.isfile(filename)
-        nums = open(filename).read().split()
-        return np.array([float(x) for x in nums]).reshape([1, 2]).astype(np.float32)
-
-
+  
     if basedir[-1] == '/':  # remove trailing '/'
         basedir = basedir[:-1]
 
     split_dir = '{}/{}/{}'.format(basedir, scene, split)
 
-    if only_img_files:
-        img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg'])
-        return img_files
-
     trajectory_pose, intrinsic_pose = load_pose_data(basedir)
 
-    # camera parameters files
-    intrinsics_files = find_files('{}/intrinsics'.format(split_dir), exts=['*.txt'])
-    pose_files = find_files('{}/pose'.format(split_dir), exts=['*.txt'])
-    loc_files = find_files('{}/loc'.format(split_dir), exts=['*.txt'])
-    logger.info('raw intrinsics_files: {}'.format(len(intrinsics_files)))
-    logger.info('raw pose_files: {}'.format(len(pose_files)))
-
-    intrinsics_files = intrinsics_files[::skip]
-    pose_files = pose_files[::skip]
-    loc_files = loc_files[::skip]
-    cam_cnt = len(pose_files)
-
-    # img files
-    img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg'])
-    if len(img_files) > 0:
-        logger.info('raw img_files: {}'.format(len(img_files)))
-        img_files = img_files[::skip]
-        assert (len(img_files) == cam_cnt)
-    else:
-        img_files = [None, ] * cam_cnt
-
-    # mask files
-    mask_files = find_files('{}/mask'.format(split_dir), exts=['*.png', '*.jpg'])
-    if len(mask_files) > 0:
-        logger.info('raw mask_files: {}'.format(len(mask_files)))
-        mask_files = mask_files[::skip]
-        assert (len(mask_files) == cam_cnt)
-    else:
-        mask_files = [None, ] * cam_cnt
-
-    # min depth files
-    mindepth_files = find_files('{}/min_depth'.format(split_dir), exts=['*.png', '*.jpg'])
-    if try_load_min_depth and len(mindepth_files) > 0:
-        logger.info('raw mindepth_files: {}'.format(len(mindepth_files)))
-        mindepth_files = mindepth_files[::skip]
-        assert (len(mindepth_files) == cam_cnt)
-    else:
-        mindepth_files = [None, ] * cam_cnt
-
-    if train_seg:
-        seg_files = find_files('{}/seg'.format(split_dir), exts=['*.png', '*.jpg'])
-        seg_files = seg_files[::skip]
-        assert (len(seg_files) == cam_cnt)
-
-    else:
-        seg_files = [None, ] * cam_cnt
-
-    if train_depth:
-        depth_files = find_files('{}/depth'.format(split_dir), exts=['*.png', '*.jpg'])
-        logger.info('raw depth_files: {}'.format(len(depth_files)))
-        depth_files = depth_files[::skip]
-        assert (len(depth_files) == cam_cnt)
-    else:
-        depth_files = [None, ] * cam_cnt
-
-
+    cube_loc, props = box_loc_from_txt()
     cube_loc = gen_box_locs(trajectory_pose.shape[0], box_number)
 
-    # assume all images have the same size as training image
-    train_imgfile = find_files('{}/{}/train/rgb'.format(basedir, scene), exts=['*.png', '*.jpg'])[0]
-    train_im = imageio.imread(train_imgfile)
-    H, W = train_im.shape[:2]
+    H, W = 360, 640
 
-    # create ray samplers
     ray_samplers = []
-    # for i in range(cam_cnt):
-    for i in range(trajectory_pose.shape[0]):
-        intrinsics = parse_txt(intrinsics_files[0])
-        pose = parse_txt(pose_files[0])
-        print("________________________")
-        print(pose.dtype)
-        posex = trajectory_pose[i].astype(np.float32)
-        print(posex.dtype)
-        print("++++++++++++++++++++++++")
 
-        # if len(loc_files) is not 0:
-        #
-        #     loc = parse_txt_loc(loc_files[0])
-        # else:
-        #     loc = None
+    for i in range(trajectory_pose.shape[0]):
+        intrinsics = intrinsic_pose.astype(np.float32)
+        posex = trajectory_pose[i].astype(np.float32)
+      
+
         loc = cube_loc[i]
         # print(loc)
-
-        # read max depth
-        try:
-            max_depth = float(open('{}/max_depth.txt'.format(split_dir)).readline().strip())
-        except:
-            max_depth = None
-        # print("LOC IS")
-        # print(loc)
-        # ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=posex, box_loc=loc,
-        #                                           img_path=img_files[i],
-        #                                           mask_path=mask_files[i],
-        #                                           min_depth_path=mindepth_files[i],
-        #                                           max_depth=max_depth))
+        
+        if not have_box:
+            loc = None
 
         ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=posex,
                                                   img_path=None,
                                                   mask_path=None,
                                                   min_depth_path=None,
-                                                  max_depth=max_depth, box_loc=loc,
+                                                  max_depth=None, box_loc=loc,
                                                   depth_path=None,
                                                   seg_path=None,
                                                   make_class_label=False))
@@ -396,6 +286,5 @@ def load_data_split_video(basedir, scene, split, skip=1, try_load_min_depth=True
     #     plot_mult_pose([trajectory_pose, dummy_pose_loc], 'input poses {} nerf ++'.format(split),
     #                    ['scene poses','box'])
 
-    logger.info('Split {}, # views: {}'.format(split, cam_cnt))
 
-    return ray_samplers
+    return ray_samplers, props

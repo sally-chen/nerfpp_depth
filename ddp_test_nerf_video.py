@@ -67,11 +67,22 @@ def convert_pose_back(C2W):
 
     return C2W[:3, 3]
 
+def get_box_props(box_number):
+    #box_props =  np.array([[0.5, 0.1, 0.9, 1,2,1, 15, 25, 35], [0.9, 0.1, 0.4, 1,3,1, 10, 5, 10], [0.2, 0.9, 0.5, 2,1,1, 45, 55, 35], [0.6, 0.7, 0.9, 1,1,2, 15, 25, 35], [0.3, 0.5, 0.3, 1,0.5,1, 10, 5, 10],
+    #                      [0.4, 0.6, 0.5, 1,0.5,0.5,45, 55, 35],[0.8, 0.2, 0.2, 0.5,1,1, 15, 25, 35], [0.4, 0.4, 0.9, 1,0.3,1, 10, 5, 10], [0.8, 0.1, 0.8, 1,1,1, 45, 55, 35]])
+
+    # box_rot = np.array([[15, 25, 35], [10, 5, 10], [45, 55, 35], [15, 25, 35], [10, 5, 10], [45, 55, 35],[15, 25, 35], [10, 5, 10], [45, 55, 35]])
+
+    box_props =  np.array([[0.5, 0.1, 0.9, 3,3,3, 30, 30, 30], [0.9, 0.1, 0.4, 2,2,2,30, 30, 30], [0.9, 0.9, 0.4, 3,3,3, 30, 30, 30]])#, [0.2, 0.9, 0.5, 1,1,1, 0, 0, 5], [0.6, 0.7, 0.9, 2,2,2, 0, 25, 5], [0.3, 0.5, 0.3, 1,1,1, 0, 0, 5],
+                         # [0.4, 0.6, 0.5, 3,3,3,0, 0, 5]])#,[0.8, 0.2, 0.2, 3,2,1,0, 0, 0], [0.4, 0.4, 0.9, 2,3,3, 0, 0, 15], [0.8, 0.1, 0.8, 1,1,1, 0, 15, 0], [0.8, 0.1, 0.8, 2,2,2, 0, 15, 0]])
+
+    assert box_props.shape == (box_number, 9)
+
+    return box_props
+
 
 def ddp_test_nerf(rank, args):
-    ###### set up multi-processing
 
-    ###### set up logger
     logger = logging.getLogger(__package__)
     setup_logger()
 
@@ -98,29 +109,21 @@ def ddp_test_nerf(rank, args):
 
         os.makedirs(out_dir, exist_ok=True)
 
-        ###### load data and create ray samplers; each process should do this
         # ray_samplers = load_data_split(args.datadir, args.scene, split, try_load_min_depth=args.load_min_depth)
-        ray_samplers_video = load_data_split_video(args.datadir, args.scene, split,
-                                                   box_number=args.box_number, try_load_min_depth=args.load_min_depth)
+        ray_samplers_video, props = load_data_split_video(args.datadir, args.scene, split,
+                                                           box_number=args.box_number, have_box=args.have_box,
+                                                           try_load_min_depth=args.load_min_depth)
 
-        def get_box_props(box_number):
-            #box_props =  np.array([[0.5, 0.1, 0.9, 1,2,1, 15, 25, 35], [0.9, 0.1, 0.4, 1,3,1, 10, 5, 10], [0.2, 0.9, 0.5, 2,1,1, 45, 55, 35], [0.6, 0.7, 0.9, 1,1,2, 15, 25, 35], [0.3, 0.5, 0.3, 1,0.5,1, 10, 5, 10],
-            #                      [0.4, 0.6, 0.5, 1,0.5,0.5,45, 55, 35],[0.8, 0.2, 0.2, 0.5,1,1, 15, 25, 35], [0.4, 0.4, 0.9, 1,0.3,1, 10, 5, 10], [0.8, 0.1, 0.8, 1,1,1, 45, 55, 35]])
-
-            # box_rot = np.array([[15, 25, 35], [10, 5, 10], [45, 55, 35], [15, 25, 35], [10, 5, 10], [45, 55, 35],[15, 25, 35], [10, 5, 10], [45, 55, 35]])
-
-            box_props =  np.array([[0.5, 0.1, 0.9, 1,1,1, 0, 0, 5], [0.9, 0.1, 0.4, 1,1,1, 0, 0, 5], [0.2, 0.9, 0.5, 1,1,1, 0, 0, 5], [0.6, 0.7, 0.9, 1,1,1, 0, 25, 5], [0.3, 0.5, 0.3, 1,1,1, 0, 0, 5],
-                                  [0.4, 0.6, 0.5, 1,1,1,0, 0, 5],[0.8, 0.2, 0.2, 0.5,2,1,0, 0, 0], [0.4, 0.4, 0.9, 2,2,2, 0, 0, 15], [0.8, 0.1, 0.8, 3,2,1, 0, 15, 0]])
-
-            assert box_props.shape == (box_number, 9)
-
-            return box_props
-
-        box_props = get_box_props(args.box_number)
+ 
+        if args.have_box:
+            box_props = get_box_props(args.box_number) #props
+            
+        else:
+            box_props = None
 
         for idx in range(len(ray_samplers_video)):
 
-            if idx < 8:
+            if idx < 6:
                 continue
 
             print('rendering : {}'.format(idx))
@@ -144,7 +147,8 @@ def ddp_test_nerf(rank, args):
                                                                           front_sample=args.front_sample,
                                                                           back_sample=args.back_sample,
                                                                           fg_bg_net=args.fg_bg_net,
-                                                                          use_zval=args.use_zval, loss_type='bce', box_number=args.box_number, box_size=args.box_size,
+                                                                          use_zval=args.use_zval, loss_type='bce',
+                                                                          box_number=args.box_number, box_size=args.box_size,
                                                                           rank=rank, DEBUG=True)
 
 
