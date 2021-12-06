@@ -543,6 +543,7 @@ class NerfNetBox(nn.Module):
         input_box = torch.cat((self.fg_embedder_position(box_offset),
                                self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
         fg_box_raw = self.box_net(input_box.float())
+        fg_bow_raw = box_density(box_offset, fg_viewdirs)
 
         ######
 
@@ -643,7 +644,7 @@ class NerfNetBox(nn.Module):
 def bdot(x, y, alpha = 1):
     return  (x * y * alpha).sum(dim=-1)
 
-def box_density(points, view, sharpness=10):
+def box_density(points, view, sharpness=2):
     N = points.shape[0]
     S = points.shape[1]
     points = points.view(-1, 3)
@@ -659,12 +660,12 @@ def box_density(points, view, sharpness=10):
     normal = points / points.norm(dim=-1)[..., None]
 
 
-    sigma = 1000 / (10. - d).clamp(min=0)
+    sigma = 100 * torch.sigmoid(50 * (1. - 60*d))
     cos_view_normal = bdot(-view, normal).clamp(min=0)
 
 
     ret['sigma'] = sigma.view(N, S, 1)
-    ret['rgb'] = cos_view_normal.view(N, S, 1) * torch.ones(N, S, 3).type_as(points)
+    ret['rgb'] = torch.ones(N, S, 3).type_as(points) * cos_view_normal.view(N, S, 1) 
 
     return ret
 
@@ -769,12 +770,10 @@ class NerfNetMoreBox(nn.Module):
         assert input_box.shape == (dots_sh[0]*self.box_number, N_samples, self.fg_embedder_position_box.out_dim + self.fg_embedder_viewdir_box.out_dim)
 
         __concrete = box_density(box_offset, expanded_viewdir_reshape)
-        fg_box_raw = self.box_net(input_box.float())  # (N, *)
+        #fg_box_raw = self.box_net(input_box.float())  # (N, *)
 
-        #fg_box_raw = __concrete
+        fg_box_raw = __concrete
         fg_box_raw_sigma = fg_box_raw['sigma'].view(dots_sh[0], self.box_number, N_samples)
-
-
 
 #         print(fg_box_raw_sigma.view(32,100, self.box_number, N_samples)[2,50,...])
 
@@ -784,8 +783,8 @@ class NerfNetMoreBox(nn.Module):
         # use sigmoid to filter sigma in empty space
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
         inside_box = 0.5 / 28. - abs_dist
-        weights = torch.prod(torch.sigmoid(inside_box * 10000.), dim=-1)
-        fg_box_raw_sigma *= weights
+        #weights = torch.prod(torch.sigmoid(inside_box * 10000.), dim=-1)
+        #fg_box_raw_sigma *= weights
 
 
         input = torch.cat((self.fg_embedder_position(fg_pts),
@@ -793,8 +792,8 @@ class NerfNetMoreBox(nn.Module):
         fg_raw = self.fg_net(input)
 
 
-        fg_raw['rgb'] = fg_raw['rgb'] * check_shadow_aabb_inters(
-            fg_pts, box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3]), box_sizes, r, self.box_number)
+        fg_raw['rgb'] = fg_raw['rgb']# * check_shadow_aabb_inters(
+          #  fg_pts, box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3]), box_sizes, r, self.box_number)
 
         # alpha blending
         fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
