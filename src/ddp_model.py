@@ -644,7 +644,7 @@ class NerfNetBox(nn.Module):
 def bdot(x, y, alpha = 1):
     return  (x * y * alpha).sum(dim=-1)
 
-def box_density(points, view, sharpness=2):
+def box_density(points, view, sharpness=20):
     N = points.shape[0]
     S = points.shape[1]
     points = points.view(-1, 3)
