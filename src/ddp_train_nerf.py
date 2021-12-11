@@ -9,7 +9,8 @@ import torch.multiprocessing
 
 from collections import OrderedDict
 from .ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
-    NerfNetBoxOnlyWithAutoExpo, DepthOracle, DepthOracleBoxOnly, DepthOracleWithBox, NerfNetMoreBoxWithAutoExpo
+    NerfNetBoxOnlyWithAutoExpo, DepthOracle, DepthOracleBoxOnly, DepthOracleWithBox, NerfNetMoreBoxWithAutoExpo,\
+    NerfNetMoreBoxIndepWithAutoExpo
 
 from .nerf_network import WrapperModule
 
@@ -488,7 +489,7 @@ def log_view_to_tb(writer, global_step, rgb_predict, depth_predict, gt_img, mask
         writer.add_image(prefix + 'level_{}/bg_lambda'.format(0), bg_lambda_im, global_step)
 
 
-def create_nerf(rank, args):
+def create_nerf(rank, args, independ_boxnet=False):
     ###### create network and wrap in ddp; each process should do this
     # fix random seed just to make sure the network is initialized with same weights at different processes
     torch.manual_seed(777)
@@ -505,6 +506,15 @@ def create_nerf(rank, args):
         optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
         models['optim_oracle'] = optim
         net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+    elif independ_boxnet:
+        ora_net = DepthOracle(args).to(rank)
+        models['net_oracle'] = WrapperModule(ora_net)
+        optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
+        models['optim_oracle'] = optim
+        net = NerfNetMoreBoxIndepWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+
+        netscene = WrapperModule(NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank))
+        
     elif args.have_box:
 
         # ora_net = DepthOracleWithBox(args).to(rank)
@@ -568,11 +578,30 @@ def create_nerf(rank, args):
 
         models['optim_oracle'].load_state_dict(to_load['optim_oracle'])
         models['net_oracle'].load_state_dict(to_load['net_oracle'])
+        
+        if independ_boxnet:
 
-        ###########################33 before donerf use random weights for nerf ##########
-        for m in range(models['cascade_level']):
-            for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-                 models[name].load_state_dict(to_load[name])
+            model_dict_new = models['net_0'].state_dict()
+            for k in model_dict_new.keys():
+                if 'fg_net' in k or 'bg_net' in k : 
+                    model_dict_new[k] = to_load['net_0'][k]
+                if 'box_net' in k:
+                    k_end = k[27:]                    
+                    k_end_load = 'module.nerf_net.box_net.' + k_end
+                    model_dict_new[k] = to_load['net_0'][k_end_load]
+
+#                 if 'box_net' in k:
+                    
+            models['net_0'].load_state_dict(model_dict_new)
+            
+#             module.nerf_net.box_net
+                                
+        else:
+
+            ###########################33 before donerf use random weights for nerf ##########
+            for m in range(models['cascade_level']):
+                for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
+                     models[name].load_state_dict(to_load[name])
                     
 #         models['net_oracle'] = models['net_oracle'].double()
 #         models['net_0'] = models['net_0'].double()

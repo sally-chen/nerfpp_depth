@@ -19,10 +19,10 @@ from scipy.spatial.transform import Rotation
 logger = logging.getLogger(__package__)
 
 class Sim:
-    def __init__(self, args, frame_height, frame_width, max_depth, camera, checkpoint=False):
+    def __init__(self, args, frame_height, frame_width, max_depth, camera, checkpoint=False, independ_boxnet=False):
         #setup(0, args.world_size)
         self.args = args
-        self.start, self.models = create_nerf(0, args)
+        self.start, self.models = create_nerf(0, args,  independ_boxnet)
         self.h = frame_height
         self.w = frame_width
         self.camera = camera
@@ -44,6 +44,7 @@ class Sim:
         ray_samplers = load_data_array([intrs], [x], [cube_locs],
                                        self.h, self.w, False,
                                        True, not self.camera)
+        
         cube_size = None
         time0 = time.time()
         ret = render_single_image(self.models, ray_samplers[0], self.args.chunk_size,
@@ -152,9 +153,8 @@ def yaw_to_mat(yaws):
 
     return Rf
 
-
 def make_sim(config_path, frame_height, frame_width, depth=60., camera=False,
-             box_num=6, chunk_size=-1, checkpoint=False):
+             box_num=6, chunk_size=-1, checkpoint=False, independ_boxnet=False):
     parser = config_parser()
     args = parser.parse_args("--config " + config_path)
     args.box_number = box_num
@@ -166,9 +166,10 @@ def make_sim(config_path, frame_height, frame_width, depth=60., camera=False,
         args.world_size = torch.cuda.device_count()
         logger.info('Using # gpus: {}'.format(args.world_size))
 
-    sim = Sim(args, frame_height, frame_width, depth, camera, checkpoint)
+    sim = Sim(args, frame_height, frame_width, depth, camera, checkpoint, independ_boxnet)
 
     return sim
+
 
 if __name__ == '__main__':
     setup_logger()
