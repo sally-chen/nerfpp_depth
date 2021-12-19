@@ -131,6 +131,9 @@ def get_rays_single_image(H, W, intrinsics, c2w):
     return rays_o, rays_d, depth
 
 def get_rays_scan(H, W, c2w):
+    
+#     c2w=c2w.double()
+    
     phi = np.linspace(-np.pi, np.pi, W).astype(dtype=np.float32)
     theta = np.linspace(-np.pi/4, np.pi/4, H,).astype(dtype=np.float32)
 

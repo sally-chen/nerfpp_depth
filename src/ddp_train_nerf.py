@@ -380,10 +380,10 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
 
 
-            box_weights = get_box_transmittance_weight(box_loc=box_loc.float(),
+            box_weights = get_box_transmittance_weight(box_loc=box_loc,
                                          fg_z_vals=fg_z_vals_centre,  ray_d=ray_d,
                                          ray_o=ray_o,
-                                         fg_depth=fg_far_depth, box_number=box_number, box_props=box_props.float())
+                                         fg_depth=fg_far_depth, box_number=box_number, box_props=box_props)
 
             ## resample from box_nerf
             # fg_weights = fg_weights + normalize_torch(box_weights)
@@ -412,7 +412,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 #             print('bg_depth', bg_depth.type())
 #             print('box_loc', box_loc.type())
 #             print('box_props', box_props.type())
-            ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc.float(), box_props.float())
+            ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc, box_props)
 
 
         # fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
@@ -508,10 +508,10 @@ def create_nerf(rank, args, independ_boxnet=False):
         net = NerfNetBoxOnlyWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
     elif independ_boxnet:
         ora_net = DepthOracle(args).to(rank)
-        models['net_oracle'] = WrapperModule(ora_net)
+        models['net_oracle'] = WrapperModule(ora_net)#.double()
         optim = torch.optim.Adam(ora_net.parameters(), lr=args.lrate)
         models['optim_oracle'] = optim
-        net = NerfNetMoreBoxIndepWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)
+        net = NerfNetMoreBoxIndepWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank)#.double()
 
         netscene = WrapperModule(NerfNetWithAutoExpo(args, optim_autoexpo=args.optim_autoexpo, img_names=img_names).to(rank))
         
@@ -872,9 +872,9 @@ def ddp_train_nerf(rank, args):
                     # ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
                     #                  ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
                     #                  ray_batch['fg_far_depth'].float(), box_loc=ray_batch['box_loc'][:, :2])
-                    ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-                                     ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
-                                     ray_batch['fg_far_depth'].float())
+                    ret = net_oracle(ray_batch['ray_o'], ray_batch['ray_d'],
+                                     ray_batch['fg_pts_flat'], ray_batch['bg_pts_flat'],
+                                     ray_batch['fg_far_depth'])
 
                 else:
                     ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
