@@ -11,7 +11,7 @@ import io
 import torch
 from scipy.spatial.transform import Rotation as R
 
-from .utils import normalize_torch
+from utils import normalize_torch
 from pytorch3d.transforms import euler_angles_to_matrix
 
 TINY_NUMBER = float(1e-6)

@@ -3,9 +3,9 @@ import torch
 import numpy as np
 import imageio
 import logging
-from .nerf_sample_ray_split import RaySamplerSingleImage
+from nerf_sample_ray_split_mip import RaySamplerSingleImageMip
 import glob
-from .helpers import plot_mult_pose
+from helpers import plot_mult_pose
 import random
 import pickle
 
@@ -63,9 +63,11 @@ def load_data_array(intrs, poses, locs, H, W, plot, normalize=True, lidar_image=
     return ray_samplers
     # max_depth=max_depth, box_loc=locs[i]))
 
-def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only_img_files=False, have_box = False,
-                    train_depth=False, train_seg = False,  train_box_only=False, custom_rays=None, box_number=10):
+def load_data_split(basedir, scene, split, skip=1, only_img_files=False, have_box = False,
+                    train_depth=False, train_seg = False, custom_rays=None, box_number=10):
 
+    print('load_data_split')
+    print(train_depth)
     def parse_txt(filename):
         assert os.path.isfile(filename)
         nums = open(filename).read().split()
@@ -142,13 +144,6 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         loc_files = find_files('{}/loc'.format(split_dir), exts=['*.txt'])
         loc_files = loc_files[::skip]
 
-
-
-
-
-
-
-
     # img files
     img_files = find_files('{}/rgb'.format(split_dir), exts=['*.png', '*.jpg'])
 
@@ -162,7 +157,10 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
 
     if train_depth:
+        
         depth_files = find_files('{}/depth'.format(split_dir), exts=['*.png', '*.jpg'])
+        
+        print(depth_files)
         logger.info('raw depth_files: {}'.format(len(depth_files)))
         depth_files = depth_files[::skip]
         assert (len(depth_files) == cam_cnt)
@@ -176,43 +174,11 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     else:
         img_files = [None, ] * cam_cnt
 
-
-    # mask files
-    mask_files = find_files('{}/mask'.format(split_dir), exts=['*.png', '*.jpg'])
-    if len(mask_files) > 0:
-        logger.info('raw mask_files: {}'.format(len(mask_files)))
-        mask_files = mask_files[::skip]
-        assert(len(mask_files) == cam_cnt)
-    else:
-        mask_files = [None, ] * cam_cnt
-
-    # min depth files
-    mindepth_files = find_files('{}/min_depth'.format(split_dir), exts=['*.png', '*.jpg'])
-    if try_load_min_depth and len(mindepth_files) > 0:
-        logger.info('raw mindepth_files: {}'.format(len(mindepth_files)))
-        mindepth_files = mindepth_files[::skip]
-        assert(len(mindepth_files) == cam_cnt)
-    else:
-        mindepth_files = [None, ] * cam_cnt
-
     # assume all images have the same size as training image
     train_imgfile = find_files('{}/{}/train/rgb'.format(basedir, scene), exts=['*.png', '*.jpg'])[0]
     train_im = imageio.imread(train_imgfile)
     H, W = train_im.shape[:2]
     #H, W = 90, 160
-
-    if custom_rays:
-        import pickle
-        ray_samplers = []
-        rays_li = pickle.load(open('./ray_list', 'rb'))
-
-        for ray in rays_li:
-            loc = np.array([ -0.2477,-0.0833, -1.])
-            ray_samplers.append(RaySamplerSingleImage(H=100, W=32, rays=ray, box_loc = loc))
-
-        return ray_samplers
-
-
 
     # create ray samplers
     ray_samplers = []
@@ -220,7 +186,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
     intrins = []
     locs = []
 
-    # tmp ##
+    ##tmp ##
     if cam_cnt > 50:
         cam_cnt = 50
 
@@ -241,10 +207,6 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
         # if (p[0] > 95. and p[1] > 136) or (p[0] > 95. and p[1] < 128) or (p[0] > 105) or (p[0] < 86):
         #     continue
         count += 1
-        ################## rand ##############33
-        #pose[:2,3] = pose[:2,3] * 0.5
-        ################## rand ##############33
-        # pose[:2,3] = pose[:2,3]
 
         poses.append(pose)
         intrins.append(intrinsics)
@@ -255,46 +217,21 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
 
 
 
-
-
-        # read max depth
-        try:
-            max_depth = float(open('{}/max_depth.txt'.format(split_dir)).readline().strip())
-        except:
-            max_depth = None
-
-
-
-        if train_box_only:
-
-            ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
+        if have_box:
+            ray_samplers.append(RaySamplerSingleImageMip(H=H, W=W, intrinsics=intrinsics,
+                                                         c2w=pose,
                                                       img_path=img_files[i],
-                                                      mask_path=mask_files[i],
-                                                      min_depth_path=mindepth_files[i],
-                                                      max_depth=max_depth, box_loc=None,
-                                                      depth_path=depth_files[i],
-                                                      seg_path=seg_files[i], train_box_only=True,
-                                                      make_class_label=True))
-
-
-        elif have_box:
-            ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
-                                                      img_path=img_files[i],
-                                                      mask_path=mask_files[i],
-                                                      min_depth_path=mindepth_files[i],
-                                                      max_depth=max_depth, box_loc=loc,
                                                       depth_path=depth_files[i],
                                                       seg_path = seg_files[i],
                                                       train_seg = False,
                                                     make_class_label=False))
 
         else:
-            ray_samplers.append(RaySamplerSingleImage(H=360, W=640, intrinsics=intrinsics, c2w=pose,
+            ray_samplers.append(RaySamplerSingleImageMip(H=360, W=640,
+                                                         intrinsics=intrinsics, c2w=pose,
+                                                         depth_path=depth_files[i],
                                                       img_path=img_files[i],
-                                                      mask_path=mask_files[i],
-                                                      min_depth_path=mindepth_files[i],
                                                       seg_path=seg_files[i],
-                                                      max_depth=max_depth, depth_path=depth_files[i],
                                                       make_class_label=False))
 
 #

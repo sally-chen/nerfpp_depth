@@ -77,6 +77,7 @@ def perturb_samples(z_vals):
     return z_vals
 
 
+
 def sample_pdf(bins, weights, N_samples, det=False):
     '''
     :param bins: tensor of shape [..., M+1], M is the number of bins

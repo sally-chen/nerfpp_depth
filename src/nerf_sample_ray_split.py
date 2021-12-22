@@ -62,6 +62,42 @@ def intersect_sphere_t(ray_o, ray_d):
 
     return d1 + d2
 
+def get_rays_mipnerf_t(H, W, intrinsics, c2w):
+        """Generating rays for all images."""
+    x, y = np.meshgrid(  # pylint: disable=unbalanced-tuple-unpacking
+        np.arange(W, dtype=np.float32),  # X-Axis (columns)
+        np.arange(H, dtype=np.float32),  # Y-Axis (rows)
+        indexing='xy')
+    
+    F = intrinsics[0,0]
+    
+    camera_dirs = np.stack(
+        [(x - W * 0.5 + 0.5) / F,
+         -(y - H * 0.5 + 0.5) / F,
+         -np.ones_like(x)], axis=-1)
+    directions = ((camera_dirs[None, ..., None, :] * c2w[:, None, None, :3, :3]).sum(axis=-1)) # [B, W,H, 3]
+    print('directions',directions.shape)
+     
+    origins = np.broadcast_to(self.camtoworlds[:, None, None, :3, -1], directions.shape) # [B, W,H, 3]
+    viewdirs = directions / np.linalg.norm(directions, axis=-1, keepdims=True) # [B, W,H, 3]
+    
+    
+
+    # Distance from each unit-norm direction vector to its x-axis neighbor.
+    dx = np.sqrt(
+        np.sum((directions[:, :-1, :, :] - directions[:, 1:, :, :])**2, -1))
+    print('dx',dx.shape)
+    dx = np.concatenate([dx, dx[:, -2:-1, :]], 1) # concat with the last dx (this is repeated)
+    print('dx',dx.shape)
+    # Cut the distance in half, and then round it out so that it's
+    # halfway between inscribed by / circumscribed about the pixel.
+    
+    radii = dx[..., None] * 2 / np.sqrt(12) #[B, W,H, 1]
+    print('radii',radii.shape)
+    
+    return origins, directions, radii
+
+
 
 def get_rays_single_image_t(H, W, intrinsics, c2w):
     '''
