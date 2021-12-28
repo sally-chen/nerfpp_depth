@@ -190,3 +190,41 @@ def colorize(x, cmap_name='jet', append_cbar=False, mask=None,is_np=False):
 
     x = torch.from_numpy(x)
     return x
+
+import ast, inspect, sys
+def get_param_names(frame, fn_name = 'log_nan'):
+    string = inspect.findsource(frame[0])[0]
+    nodes = ast.parse(''.join(string))
+
+    i_expr = -1
+    for (i, node) in enumerate(nodes.body):
+        if (hasattr(node, 'value') and isinstance(node.value, ast.Call)
+            and hasattr(node.value.func, 'id') and node.value.func.id == fn_name):
+            i_expr = i
+            break
+
+    i_expr_next = min(i_expr + 1, len(nodes.body)-1)
+    lineno_start = nodes.body[i_expr].lineno
+    lineno_end = nodes.body[i_expr_next].lineno if i_expr_next != i_expr else len(string)
+
+    str_func_call = ''.join([i.strip() for i in string[lineno_start - 1: lineno_end]])
+    params = str_func_call[str_func_call.find('(') + 1:-1].split(',')
+
+    return params
+
+def log_nan(*args, exit=False):
+    curr_frame = inspect.currentframe()
+    prev_frame = inspect.getouterframes(curr_frame)[1]
+    caller = inspect.getframeinfo(inspect.stack()[1][0])
+    params = get_param_names(prev_frame)
+
+    nan_names = [name.strip(' ') for name, val in zip(params, args)
+                            if torch.is_tensor(val) and torch.isnan(val).any()]
+
+    if len(nan_names) > 0:
+        log_msg = "NaN Log | {:s}:{:d} - {:s}".format(caller.filename, caller.lineno, str(nan_names))
+        if exit:
+            raise ValueError(log_msg)
+        else:
+            print(log_msg)
+
