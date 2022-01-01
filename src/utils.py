@@ -192,39 +192,63 @@ def colorize(x, cmap_name='jet', append_cbar=False, mask=None,is_np=False):
     return x
 
 import ast, inspect, sys
-def get_param_names(frame, fn_name = 'log_nan'):
-    string = inspect.findsource(frame[0])[0]
-    nodes = ast.parse(''.join(string))
 
-    i_expr = -1
-    for (i, node) in enumerate(nodes.body):
-        if (hasattr(node, 'value') and isinstance(node.value, ast.Call)
-            and hasattr(node.value.func, 'id') and node.value.func.id == fn_name):
-            i_expr = i
-            break
+from varname import argname
 
-    i_expr_next = min(i_expr + 1, len(nodes.body)-1)
-    lineno_start = nodes.body[i_expr].lineno
-    lineno_end = nodes.body[i_expr_next].lineno if i_expr_next != i_expr else len(string)
+def log_nan(*args, exit=True):
+    return
+#    print(params)
+    for i, val in enumerate(args):
+        if torch.is_tensor(val):
+            log_msg = None
+            if torch.isnan(val).any():
+                log_msg = "NaN Log | Arg No. {:d}".format(i)
+            elif not torch.isfinite(val).all():
+                log_msg = "Inf Log | Arg No. {:d}".format(i)
 
-    str_func_call = ''.join([i.strip() for i in string[lineno_start - 1: lineno_end]])
-    params = str_func_call[str_func_call.find('(') + 1:-1].split(',')
 
-    return params
-
-def log_nan(*args, exit=False):
-    curr_frame = inspect.currentframe()
-    prev_frame = inspect.getouterframes(curr_frame)[1]
-    caller = inspect.getframeinfo(inspect.stack()[1][0])
-    params = get_param_names(prev_frame)
-
-    nan_names = [name.strip(' ') for name, val in zip(params, args)
-                            if torch.is_tensor(val) and torch.isnan(val).any()]
-
-    if len(nan_names) > 0:
-        log_msg = "NaN Log | {:s}:{:d} - {:s}".format(caller.filename, caller.lineno, str(nan_names))
-        if exit:
+        if log_msg and exit:
             raise ValueError(log_msg)
-        else:
+        elif log_msg:
             print(log_msg)
+
+
+from torch.autograd.functional import _as_tuple, _grad_preprocess, _check_requires_grad, _validate_v, _autograd_grad, _fill_in_zeros, _grad_postprocess, _tuple_postprocess
+
+def fw_linearize(func, inputs, create_graph=False, strict=False):
+    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
+    inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
+
+
+    outputs = func(*inputs)
+    is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
+    _check_requires_grad(outputs, "outputs", strict=strict)
+    # The backward is linear so the value of grad_outputs is not important as
+    # it won't appear in the double backward graph. We only need to ensure that
+    # it does not contain inf or nan.
+    grad_outputs = tuple(torch.zeros_like(out, requires_grad=True) for out in outputs)
+
+    grad_inputs = _autograd_grad(outputs, inputs, grad_outputs, create_graph=True)
+    _check_requires_grad(grad_inputs, "grad_inputs", strict=strict)
+
+    def lin_fn(v, retain_graph=True):
+        if v is not None:
+            _, v = _as_tuple(v, "v", "jvp")
+            v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
+            _validate_v(v, inputs, is_inputs_tuple)
+        else:
+            if len(inputs) != 1 or inputs[0].nelement() != 1:
+                raise RuntimeError("The vector v can only be None if the input to "
+                                   "the user-provided function is a single Tensor "
+                                   "with a single element.")
+
+        grad_res = _autograd_grad(grad_inputs, grad_outputs, v, create_graph=create_graph, retain_graph=retain_graph)
+
+        jvp = _fill_in_zeros(grad_res, outputs, strict, create_graph, "back_trick")
+
+        # Cleanup objects and return them to the user
+        jvp = _grad_postprocess(jvp, create_graph)
+
+        return _tuple_postprocess(jvp, is_outputs_tuple)
+    return lin_fn
 

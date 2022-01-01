@@ -76,9 +76,9 @@ def get_rays_mipnerf(H, W, intrinsics, c2w):
          -(y - H * 0.5 + 0.5) / F,
          -np.ones_like(x)], axis=-1)
     
-    print(camera_dirs.shape, c2w.shape)
+    #print(camera_dirs.shape, c2w.shape)
     directions = ((camera_dirs[..., None, :] * c2w[None, None, :3, :3]).sum(axis=-1)) # [B, W,H, 3]
-    print('directions',directions.shape)
+    #print('directions',directions.shape)
      
     origins = np.broadcast_to(c2w[None, None, :3, -1], directions.shape) # [B, W,H, 3]
   
@@ -88,9 +88,9 @@ def get_rays_mipnerf(H, W, intrinsics, c2w):
     dx = np.concatenate([dx, dx[:, -2:-1, :]], 1) # concat with the last dx (this is repeated)
     # Cut the distance in half, and then round it out so that it's
     # halfway between inscribed by / circumscribed about the pixel. 
-    print('dx',dx.shape)
+    #print('dx',dx.shape)
     radii = dx * 2. / np.sqrt(12.) #[W,H, 1]
-    print('radii',radii.shape)
+    #print('radii',radii.shape)
     
     return origins.astype(np.float32), directions.astype(np.float32), radii.astype(np.float32)
 
@@ -259,7 +259,7 @@ class RaySamplerSingleImageMip(object):
 
             if self.train_seg:
                 self.pole_inds = (seg_map == 3).nonzero()[0] #5 is pole 3 is box
-                print('seg inds length {}'.format(self.pole_inds.shape[0]))
+                #print('seg inds length {}'.format(self.pole_inds.shape[0]))
                 if self.pole_inds.shape[0] == 0:
                     self.pole_inds = None
 
@@ -291,7 +291,7 @@ class RaySamplerSingleImageMip(object):
             self.depth_map_nonorm = depth_map
             self.depth_map = None#self.depth_normalize(depth_map)
             
-        print('depth',self.depth_map_nonorm)
+        #print('depth',self.depth_map_nonorm)
 
               
 

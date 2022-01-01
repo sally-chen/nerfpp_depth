@@ -464,9 +464,9 @@ def create_nerf(rank, args):
         fpath_dep =\
         "/home/sally/nerf_clone/nerfpp_depth/logs/box_only_train_norm3_K=9Z=9_bg127/model_340000.pth"
         
-        to_load_dep = torch.load(fpath_dep)
+        #to_load_dep = torch.load(fpath_dep)
 
-        models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
+        #models['net_oracle'].load_state_dict(to_load_dep['net_oracle'])
 
     start = 0
     return start, models
@@ -514,6 +514,7 @@ def ddp_train_nerf(rank, args):
     # start training
     what_val_to_log = 0             #
     what_train_to_log = 0
+
 
     for global_step in range(start+1, start+1+args.N_iters):
 
@@ -680,7 +681,7 @@ def ddp_train_nerf(rank, args):
 #             what_train_to_log += 1
 #             dt = time.time() - time0
 
-#             logger.info('Logged a random validation view in {} seconds'.format(dt))
+#             logger.info('Logged a random validation view in {} seconds'.format(dt))j
 
 
 
@@ -707,7 +708,7 @@ def ddp_train_nerf(rank, args):
             to_save = OrderedDict()
 
             to_save['net_oracle'] = models['net_oracle'].state_dict()
-            to_save['optim_oracle'] = models['optim_oracle'].state_dict()
+            #to_save['optim_oracle'] = models['optim_oracle'].state_dict()
 
             to_save['net_0'] = models['net_0'].state_dict()
             to_save['optim_0'] = models[ 'optim_0'].state_dict()

@@ -67,7 +67,7 @@ def load_data_split(basedir, scene, split, skip=1, only_img_files=False, have_bo
                     train_depth=False, train_seg = False, custom_rays=None, box_number=10):
 
     print('load_data_split')
-    print(train_depth)
+   # print(train_depth)
     def parse_txt(filename):
         assert os.path.isfile(filename)
         nums = open(filename).read().split()
@@ -160,7 +160,7 @@ def load_data_split(basedir, scene, split, skip=1, only_img_files=False, have_bo
         
         depth_files = find_files('{}/depth'.format(split_dir), exts=['*.png', '*.jpg'])
         
-        print(depth_files)
+        #print(depth_files)
         logger.info('raw depth_files: {}'.format(len(depth_files)))
         depth_files = depth_files[::skip]
         assert (len(depth_files) == cam_cnt)
@@ -187,8 +187,8 @@ def load_data_split(basedir, scene, split, skip=1, only_img_files=False, have_bo
     locs = []
 
     ##tmp ##
-    if cam_cnt > 50:
-        cam_cnt = 50
+    #if cam_cnt > 50:
+    #    cam_cnt = 50
 
     ## tmp ##
 
@@ -199,7 +199,7 @@ def load_data_split(basedir, scene, split, skip=1, only_img_files=False, have_bo
     count = 0
     for i in range(cam_cnt):
 
-        print(i)
+        #print(i)
         intrinsics = parse_txt(intrinsics_files[i])
         pose = parse_txt(pose_files[i])
 
@@ -295,7 +295,7 @@ def load_data_split(basedir, scene, split, skip=1, only_img_files=False, have_bo
     # pickle.dump([poses, intrins, locs], outfile)
     # outfile.close()
 
-    print("finished getting rays")
-    print("[Number of image: {}]".format(count))
+    #print("finished getting rays")
+    #print("[Number of image: {}]".format(count))
     return ray_samplers
 

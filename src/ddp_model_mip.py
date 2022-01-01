@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 # import numpy as np
-from utils import TINY_NUMBER, HUGE_NUMBER, log_nan
+from utils import TINY_NUMBER, HUGE_NUMBER, log_nan, fw_linearize
 from collections import OrderedDict
 from nerf_network import Embedder, MLPNet, MLPNetClassier, MLPNetMip
 import os
@@ -146,10 +146,11 @@ class DepthOracle(nn.Module):
 
         return ret
 
+def bj(f, x):
+    def _f(_x):
+        return torch.sum(f(_x), dim=0)
 
-
-
-
+    return torch.autograd.functional.jacobian(_f, x, create_graph=True).permute(1, 0, 2)
 
 def contract_gaussian(mean, cov_full):
     '''
@@ -164,12 +165,24 @@ def contract_gaussian(mean, cov_full):
 
     '''
     # contract
-    f = lambda x: ( 2. - 1. / (torch.norm(x, dim=-1, keepdim=True)+TINY_NUMBER)
-                ) * (x / (torch.norm(x, dim=-1, keepdim=True)+TINY_NUMBER))
+    def f(x):
+        nx = torch.norm(x, dim=-1, keepdim=True) + TINY_NUMBER
+        contract = (2. - 1. / nx) * (x / nx) 
+        y = torch.where(nx <= 1, x, contract)
+        return y
+
+#    mean.view(-1, 3)
+#    lin_fn = fw_linearize(f, mean.view(-1, 3))
+#    mx = f(mean)
+#    J = lin_fn(lin_fn(cov_full).transpose(-2, -1))
+#    return mx, J
+
 
     N_rays, N_Samples = mean.shape[0], mean.shape[1]
-    J_mean = torch.autograd.functional.jacobian(f, mean.reshape([N_rays* N_Samples, -1]))
-    J_mean = torch.diagonal(J_mean, dim1=0, dim2=2).reshape([N_rays, N_Samples, 3,3])
+    J_mean = bj(f, mean.reshape(-1, 3))
+    #print(J_mean.shape)
+#    J_mean = torch.diagonal(J_mean, dim1=0, dim2=2).reshape([N_rays, N_Samples, 3,3])
+    J_mean = J_mean.view(N_rays, N_Samples, 3, 3)
     mean_contract = f(mean)
 
 
@@ -177,9 +190,8 @@ def contract_gaussian(mean, cov_full):
 #     print('mean_contract', mean_contract.shape)
 #     print('J_mean', J_mean.shape)
     cov_contract = torch.matmul(torch.matmul( J_mean, cov_full), torch.transpose(J_mean, -2,-1))
+    #print(cov_contract.norm('nuc', dim=(-2, -1)))
     return mean_contract, cov_contract
-
-
 
 
 
@@ -304,7 +316,7 @@ P = torch.tensor([
         0., 0., 1.,
         -0.5, 0.309017, 0.809017,
         -0.809017, 0.5, 0.309017,
-        -0.809017, 0.5, -0.309017]).cuda().float().reshape((3,21))
+        -0.809017, 0.5, -0.309017]).cuda().float().reshape((21, 3)).T.contiguous()
 
 
 def integrated_pos_enc(x_coord, min_deg, max_deg, diag=True):
@@ -326,24 +338,29 @@ def integrated_pos_enc(x_coord, min_deg, max_deg, diag=True):
 
     if not diag:
         x, x_cov = x_coord
-        basis = P # shape [21, 3]
+    #    basis = P # shape [21, 3]
+        scales = torch.arange(min_deg, max_deg).type_as(x)
+        scales = 2**scales
+        basis = P.type_as(x)[:, None, :].expand(-1, scales.shape[0], -1)
+        basis = scales[None, :, None] * basis
+        basis = basis.view(x.shape[-1], -1)
          #jnp.concatenate(
 #             [2**i * jnp.eye(num_dims) for i in range(min_deg, max_deg)], 1)
-        y = torch.matmul(x, basis)
+
+        basis = basis[None, None, ...]
+        y = torch.matmul(x, basis).squeeze() # [N, Ns, 21 * L]
         # Get the diagonal of a covariance matrix (ie, variance). This is equivalent
         # to jax.vmap(jnp.diag)((basis.T @ covs) @ basis).
-        y_var = torch.sum(torch.matmul(x_cov, basis.unsqueeze(0).unsqueeze(0)) * basis, dim=-2) # [N, Ns, 21 ]
-        shape = list(y.shape[:-1]) + [-1]
-        scales = torch.tensor([2**i for i in range(min_deg, max_deg)]).type_as(x)
-        y = torch.reshape(y.unsqueeze(-2) * scales.unsqueeze(-1), shape) # [N, Ns, 21*16 ]
-        y_var = torch.reshape(y_var.unsqueeze(-2) * scales.unsqueeze(-1)**2, shape) # [N, Ns, 21*16 ]
-
+        y_var = torch.sum(torch.matmul(x_cov, basis) * basis, dim=-2) # [N, Ns, 21 * L]
     else:
-        x, x_cov_diag = x_coord # both [N, Ns, 3]
-        scales = torch.tensor([2**i for i in range(min_deg, max_deg)]).type_as(x)
+        x, x_var = x_coord # both [N, Ns, 3]
+        scales = torch.arange(min_deg, max_deg).type_as(x)
+        scales = 2**scales
         shape = list(x.shape[:-1]) + [-1]
         y = torch.reshape(x.unsqueeze(-2) * scales.unsqueeze(-1), shape)  # [N, Ns, 3*16]
-        y_var = torch.reshape(x_cov_diag.unsqueeze(-2) * scales.unsqueeze(-1)**2, shape) # [N, Ns, 3*16]
+        y_var = torch.reshape(x_var.unsqueeze(-2) * scales.unsqueeze(-1)**2, shape) # [N, Ns, 3*16]
+
+    log_nan(y, y_var)
 
     return expected_sin(
       torch.cat([y, y + 0.5 * np.pi], axis=-1),
@@ -356,7 +373,6 @@ def expected_sin(x, x_var):
 #     print('--expected sin--')
 #     print('x', x.shape)
 #     print('x_var', x.shape)
-
     y = torch.exp(-0.5 * x_var) * torch.sin(x)
     y_var = torch.max(
       torch.zeros_like(x_var), 0.5 * (1. - torch.exp(-2. * x_var) * torch.cos(2. * x)) - y**2)
@@ -390,6 +406,9 @@ class MipNerf(nn.Module):
         print('---volume_rendering--')
 #         print('density', density.shape)
 #         print('dists', dists.shape)
+    #    print(torch.any(dists < 0))
+     #   print(torch.any(density < 0))
+        log_nan(density, rgb, dists, z_vals)
 
         alpha = 1. - torch.exp(-density.squeeze(-1) * dists)  # [..., N_samples]
         T = torch.cumprod(1. - alpha + TINY_NUMBER, dim=-1)  # [..., N_samples]
@@ -401,7 +420,8 @@ class MipNerf(nn.Module):
         t_mids = 0.5 * (z_vals[..., :-1] + z_vals[..., 1:])
         depth_map = torch.sum(weights * t_mids, dim=-1) / (acc+ TINY_NUMBER) # [...,] uses midpoint instead
 
-        log_nan(alpha, T, weights, rgb_map, acc, t_mids, depth_map)
+        log_nan(alpha, T, weights, rgb_map, acc, t_mids)
+        log_nan(depth_map)
         return rgb_map, depth_map, T
 
     def process_raw(self, raw_rgb, raw_density):
@@ -437,13 +457,13 @@ class MipNerf(nn.Module):
           self.max_deg_point,
           )
 
-        log_nan(fg_mean, fg_cov, samples_enc_fg)
+        #log_nan(fg_mean, fg_cov, samples_enc_fg)
 
         direction_enc = self.embedder_viewdir(viewdirs)
 #         print('direction_enc', direction_enc.shape)
         fg_raw_rgb, fg_raw_density = self.fg_net(samples_enc_fg, direction_enc )
 
-        log_nan(direction_enc, fg_raw_rgb, fg_raw_density)
+        #log_nan(direction_enc, fg_raw_rgb, fg_raw_density)
 
         # import ipdb; ipdb.set_trace()
 
@@ -457,7 +477,7 @@ class MipNerf(nn.Module):
         # Volumetric rendering
         fg_rgb, fg_density = self.process_raw(fg_raw_rgb, fg_raw_density)
 
-        log_nan(fg_rgb, fg_density)
+        #log_nan(fg_rgb, fg_density)
 
         fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
         # account for view directions
@@ -469,7 +489,7 @@ class MipNerf(nn.Module):
           fg_density, fg_rgb,  fg_dists, fg_z_vals
         )
 
-        log_nan(fg_dists, fg_rgb_map, fg_depth_map)
+        #log_nan(fg_dists, fg_rgb_map, fg_depth_map)
 
         print('-----bg-----')
 
@@ -479,7 +499,7 @@ class MipNerf(nn.Module):
         bg_z_vals_real = bgzval2pts_outside(ray_o, ray_d, bg_z_vals_1_0)
 
 
-        log_nan(bg_lambda, bg_z_vals_real)
+        #log_nan(bg_lambda, bg_z_vals_real)
 
 #         print('bg_z_vals_real',bg_z_vals_real.shape)
 
@@ -487,22 +507,23 @@ class MipNerf(nn.Module):
                                          ray_d, radii, diag=False)
         bg_meanP, bg_cov_fullP = contract_gaussian(bg_mean, bg_cov_full)
 
-        log_nan(bg_mean, bg_cov_full, bg_meanP, bg_cov_fullP)
+        #log_nan(bg_mean, bg_cov_full, bg_meanP, bg_cov_fullP)
 
 #         print('bg_meanP',bg_meanP.shape)
 #         print('bg_cov_fullP',bg_cov_fullP.shape)
 
         samples_enc_bg = integrated_pos_enc(
           (bg_meanP, bg_cov_fullP),
-          self.min_deg_point,
-          self.max_deg_point,
+           self.min_deg_point,
+           self.max_deg_point,
             diag=False
           )
         print('--bgnet inference--')
-        print(samples_enc_bg[396, 13, :])
+        #print(samples_enc_bg[396, 13, :])
+        log_nan(samples_enc_bg, direction_enc)
         bg_raw_rgb, bg_raw_density = self.bg_net(samples_enc_bg, direction_enc )
-        get_nan_index(bg_raw_rgb)
-        get_nan_index(bg_raw_density)
+        #get_nan_index(bg_raw_rgb)
+        #get_nan_index(bg_raw_density)
         bg_rgb, bg_density = self.process_raw(bg_raw_rgb, bg_raw_density)
 
         log_nan(samples_enc_bg)
