@@ -746,8 +746,8 @@ class NerfNetMoreBoxIndep(nn.Module):
             box_sigmas.append(fg_box_raw['sigma'].view(dots_sh[0], 1,N_samples))
             box_rgbs.append(fg_box_raw['rgb'].view(dots_sh[0], 1, N_samples, 3))
             
-        fg_box_raw_sigma = torch.concat(box_sigmas, dim=1) 
-        fg_box_raw_rgb = torch.concat(box_rgbs, dim=1) 
+        fg_box_raw_sigma = torch.cat(box_sigmas, dim=1) 
+        fg_box_raw_rgb = torch.cat(box_rgbs, dim=1) 
 #         print(fg_box_raw_sigma.view(32,100, self.box_number, N_samples)[2,50,...])
 
         colors = colors.unsqueeze(0).unsqueeze(-2).expand(dots_sh[0], -1, N_samples, 3)
