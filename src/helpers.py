@@ -274,7 +274,7 @@ def get_box_transmittance_weight(box_loc, fg_z_vals, ray_d, ray_o, fg_depth,box_
     # pts: N x 128 x 3
     # assume axis aligned box
 
-    multiplier = 75
+    multiplier = 75.
     box_loc = box_loc.clone()
 
     assert box_loc.shape == (ray_o.shape[0], box_number, 3)
@@ -304,12 +304,12 @@ def get_box_transmittance_weight(box_loc, fg_z_vals, ray_d, ray_o, fg_depth,box_
 
     offset = (fg_pts - box_loc.unsqueeze(1).expand(-1,N_samples,-1,-1)).unsqueeze(-1).float()
     offset_rot = torch.abs(torch.matmul(torch.inverse(r_mat), offset)).squeeze(-1)
-    abs_dist  = offset_rot / box_size.unsqueeze(1).expand(-1,N_samples,-1,-1)  #box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
+    abs_dist  = offset_rot / (box_size.unsqueeze(1).expand(-1,N_samples,-1,-1) +TINY_NUMBER) #box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
     inside_box = 0.5  - abs_dist
-    weights = torch.prod(torch.sigmoid(inside_box * 1000000), dim=-1) # N_rays + [N_samples, box_number]
+    weights = torch.prod(torch.sigmoid(inside_box * 1000.), dim=-1) # N_rays + [N_samples, box_number]
 
 
-    box_occupancy = (torch.sigmoid(torch.sum(weights, dim=-1)*1000000) - 0.5 ) * 2
+    box_occupancy = (torch.sigmoid(torch.sum(weights, dim=-1)*1000.) - 0.5 ) * 2
 
     # in_boxes = weights > 0.95  # torch.sum(in_boxes_compare, dim=-1) == 3  # N, N_samples, N_b,
     #
@@ -372,7 +372,7 @@ def check_shadow_aabb_inters(fg_pts, box_loc, box_sizes, box_rot, box_number):
     fg_pts_rot = torch.matmul(torch.inverse(box_rot), fg_pts.unsqueeze(-1)).squeeze(-1)
 
     # rayd
-    ray_d_norm_rot = (fg_pts_rot - sun_location_rot) / torch.norm(fg_pts_rot - sun_location_rot, dim =-1, keepdim=True) # normalize
+    ray_d_norm_rot = (fg_pts_rot - sun_location_rot) / (torch.norm(fg_pts_rot - sun_location_rot, dim =-1, keepdim=True)+TINY_NUMBER) # normalize
     ray_d_frac = torch.zeros_like(ray_d_norm_rot)
     ray_d_frac[ray_d_norm_rot == 0.] = HUGE_NUMBER
     ray_d_frac[ray_d_norm_rot != 0.] = torch.div(1., ray_d_norm_rot[ray_d_norm_rot != 0.])
@@ -463,7 +463,7 @@ def check_shadow(fg_pts, box_loc, box_sizes, box_rot, box_number):
     abs_dist = offset_rot / box_size.unsqueeze(1).expand(-1, N_samples, -1,
                                                          -1)  # box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
     inside_box = 0.5 - abs_dist
-    weights = torch.prod(torch.sigmoid(inside_box * 10000), dim=-1)  # N_rays + [N_samples, box_number]
+    weights = torch.prod(torch.sigmoid(inside_box * 1000.), dim=-1)  # N_rays + [N_samples, box_number]
     # print(inside_box[0])
 
     # in_boxes_compare = torch.gt(fg_pts, mins) & torch.lt(fg_pts, maxs)  # N, N_samples, N_b,

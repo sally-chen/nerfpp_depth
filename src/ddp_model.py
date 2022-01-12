@@ -726,7 +726,7 @@ class NerfNetMoreBoxIndep(nn.Module):
         box_offset = ((torch.matmul(torch.inverse(r_mat_expand) ,
                         (fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
                         - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])).unsqueeze(-1)).squeeze(-1))/
-                      (box_sizes*30.).unsqueeze(0).unsqueeze(0))\
+                      (box_sizes*30.+TINY_NUMBER).unsqueeze(0).unsqueeze(0))\
             .permute(0,2,1,3).reshape(dots_sh[0],self.box_number, N_samples, 3)
 
 
@@ -756,7 +756,7 @@ class NerfNetMoreBoxIndep(nn.Module):
         # use sigmoid to filter sigma in empty space
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
         inside_box = 0.5 / 28. - abs_dist
-        weights = torch.prod(torch.sigmoid(inside_box * 10000.), dim=-1)        
+        weights = torch.prod(torch.sigmoid(inside_box * 1000.), dim=-1)        
         fg_box_raw_sigma *= weights
 
 
@@ -927,7 +927,7 @@ class NerfNetMoreBox(nn.Module):
         box_offset = ((torch.matmul(torch.inverse(r_mat_expand) ,
                         (fg_pts.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3])
                         - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])).unsqueeze(-1)).squeeze(-1))/
-                      (box_sizes*30.).unsqueeze(0).unsqueeze(0))\
+                      (box_sizes*30.+ TINY_NUMBER).unsqueeze(0).unsqueeze(0))\
             .permute(0,2,1,3).reshape(dots_sh[0]*self.box_number, N_samples, 3)
 
 
@@ -949,7 +949,7 @@ class NerfNetMoreBox(nn.Module):
         # use sigmoid to filter sigma in empty space
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
         inside_box = 0.5 / 28. - abs_dist
-        weights = torch.prod(torch.sigmoid(inside_box * 10000.), dim=-1)        
+        weights = torch.prod(torch.sigmoid(inside_box * 1000.), dim=-1)        
         fg_box_raw_sigma *= weights
 
 
