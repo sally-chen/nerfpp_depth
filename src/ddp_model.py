@@ -755,7 +755,7 @@ class NerfNetMoreBoxIndep(nn.Module):
         # use sigmoid to filter sigma in empty space
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
         inside_box = 0.5 / 28. - abs_dist
-        weights = torch.prod(torch.sigmoid(inside_box * 1000.), dim=-1)        
+        weights = torch.prod(torch.sigmoid(inside_box * 50.), dim=-1)        
         fg_box_raw_sigma *= weights
 
 
