@@ -285,13 +285,6 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
     if fg_weights is None:
         fg_weights = data['likeli_fg'].clone() # Avoid inplace ops
         bg_weights = data['likeli_bg'].clone()
-    #
-    # fg_z_vals_centre_np = fg_z_vals_centre.cpu().numpy()
-    # bg_z_vals_centre_np = bg_z_vals_centre.cpu().numpy()
-    #
-    # fg_weights_np = fg_weights.cpu().numpy()
-    # bg_weights_np = bg_weights.cpu().numpy()
-
 
     fg_weights = torch.sigmoid(fg_weights)
 
@@ -311,8 +304,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
 
     fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights[:, 1:front_sample-1],
                           N_samples=samples, det=True))  # [..., N_samples]
-
-
+    
     fg_depth = fg_depth.clone()
     fg_depth[fg_depth<0.0002] = float(0.0002)
 
@@ -322,9 +314,10 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
     bg_weights = torch.fliplr(bg_weights)
 
     bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]
-
+    
     bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                           N_samples=samples, det=True))  # [..., N_samples]
+
 
     # bg_depth_np = bg_depth.cpu().numpy()
     # fg_depth_np = fg_depth.cpu().numpy()
@@ -384,6 +377,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
                                          fg_z_vals=fg_z_vals_centre,  ray_d=ray_d,
                                          ray_o=ray_o,
                                          fg_depth=fg_far_depth, box_number=box_number, box_props=box_props)
+
 
             ## resample from box_nerf
             # fg_weights = fg_weights + normalize_torch(box_weights)
