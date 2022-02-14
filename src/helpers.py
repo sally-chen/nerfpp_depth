@@ -306,10 +306,10 @@ def get_box_transmittance_weight(box_loc, fg_z_vals, ray_d, ray_o, fg_depth,box_
     offset_rot = torch.abs(torch.matmul(torch.inverse(r_mat), offset)).squeeze(-1)
     abs_dist  = offset_rot / (box_size.unsqueeze(1).expand(-1,N_samples,-1,-1) +TINY_NUMBER) #box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
     inside_box = 0.5  - abs_dist
-    weights = torch.prod(torch.sigmoid(inside_box * 1000.), dim=-1) # N_rays + [N_samples, box_number]
+    weights = torch.prod(torch.sigmoid(inside_box * 20.), dim=-1) # N_rays + [N_samples, box_number]
 
 
-    box_occupancy = (torch.sigmoid(torch.sum(weights, dim=-1)*1000.) - 0.5 ) * 2
+    box_occupancy = (torch.sigmoid(torch.sum(weights, dim=-1)*20.) - 0.5 ) * 2
 
     # in_boxes = weights > 0.95  # torch.sum(in_boxes_compare, dim=-1) == 3  # N, N_samples, N_b,
     #
@@ -394,9 +394,9 @@ def check_shadow_aabb_inters(fg_pts, box_loc, box_sizes, box_rot, box_number):
 
     # there is no intersection if tmins > tmaxs for all axis, or tmax < 0 (box behind ray) for each box
     # use sigmoid to make it differentiable
-    not_behind_cam = torch.sigmoid(t_minof_maxes*1000)
-    inters_box_each = torch.sigmoid((t_minof_maxes-t_maxof_mins)*1000) * not_behind_cam
-    rad_show = -1 * torch.sigmoid(torch.sum(inters_box_each, dim=-1)*1000) + 1.5
+    not_behind_cam = torch.sigmoid(t_minof_maxes*50.)
+    inters_box_each = torch.sigmoid((t_minof_maxes-t_maxof_mins)*50.) * not_behind_cam
+    rad_show = -1 * torch.sigmoid(torch.sum(inters_box_each, dim=-1)*50.) + 1.5
 
     # inters_box_each = torch.ones([N_rays, box_number]).type_as(box_loc)  # N, 127
     # inters_box_each = torch.where(torch.logical_or(torch.gt(t_maxof_mins, t_minof_maxes), torch.lt(t_minof_maxes, 0.)) ,

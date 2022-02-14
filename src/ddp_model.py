@@ -86,47 +86,6 @@ def depth2pts_outside_np(ray_o, ray_d, depth):
     return pts, depth_real
 
 
-class DepthOracleWithBox(nn.Module):
-
-    def __init__(self, args):
-        super().__init__()
-
-
-        pos_ch_fg = (args.front_sample - 1) * 3
-        pos_ch_bg = (args.back_sample - 1) * 4
-
-        self.ora_net_fg = MLPNetClassier(D=args.netdepth, W=args.netwidth,
-                                         pos_ch=pos_ch_fg + 2 , # box x,y
-                                         out_dim=args.front_sample)
-
-        self.ora_net_bg = MLPNetClassier(D=args.netdepth, W=args.netwidth,
-                                         pos_ch=pos_ch_bg,
-                                         out_dim=args.back_sample)
-
-    def forward(self, ray_o, ray_d, points_fg, points_bg, fg_far_depth, box_loc):
-        '''
-       :param ray_o, ray_d: [N_rays, 3]
-       :param cls_label: [N_rays, N_samples]
-       :param points: [N_rays, 3*N_front_sample +4 * N_back_samples]
-       :return
-       '''
-
-        # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
-        ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
-        viewdirs = ray_d / ray_d_norm  # [..., 3]
-
-        ray_o_bg = ray_o + ray_d * fg_far_depth.unsqueeze(-1)
-
-        pt_fg_loc = torch.cat([points_fg, box_loc], dim=-1)
-
-        depth_likeli_fg = self.ora_net_fg(ray_o, viewdirs, pt_fg_loc)
-        depth_likeli_bg = self.ora_net_bg(ray_o_bg, viewdirs, points_bg)
-
-        ret = OrderedDict([('likeli_fg', depth_likeli_fg), ('likeli_bg', depth_likeli_bg)])
-
-        return ret
-
-
 
 
 class DepthOracle(nn.Module):
@@ -339,145 +298,8 @@ class NerfNet(nn.Module):
         return ret
 
 
-class DepthOracleBoxOnly(nn.Module):
-
-    def __init__(self, args):
-        super().__init__()
-
-        self.pencode = args.pencode
-        self.penc_pts = args.penc_pts
-
-        self.use_zval = args.use_zval
-
-        if self.use_zval:
-            pos_ch_fg = args.front_sample - 1
-
-        else:
-            pos_ch_fg = (args.front_sample - 1) * 3
 
 
-        if self.penc_pts:
-            self.embedder_pts = Embedder(input_dim=pos_ch_fg,
-                                         max_freq_log2=args.max_freq_log2_pts - 1,
-                                         N_freqs=args.max_freq_log2_pts)
-
-            pos_ch_fg = self.embedder_pts.out_dim
-
-
-        if self.pencode:
-            self.embedder_position = Embedder(input_dim=3,
-                                              max_freq_log2=args.max_freq_log2 - 1,
-                                              N_freqs=args.max_freq_log2)
-            self.embedder_viewdir = Embedder(input_dim=3,
-                                             max_freq_log2=args.max_freq_log2_viewdirs - 1,
-                                             N_freqs=args.max_freq_log2_viewdirs)
-
-            self.ora_net_fg = MLPNetClassier(input_ch=self.embedder_position.out_dim,
-                                             input_ch_viewdirs=self.embedder_viewdir.out_dim, D=args.netdepth,
-                                             W=args.netwidth,
-                                             pos_ch=pos_ch_fg,
-                                             out_dim=args.front_sample)
-
-        else:
-
-            self.ora_net_fg = MLPNetClassier(D=args.netdepth, W=args.netwidth,
-                                             pos_ch=pos_ch_fg,
-                                             out_dim=args.front_sample)
-
-
-    def forward(self, ray_o, ray_d, points_fg):
-        '''
-       :param ray_o, ray_d: [N_rays, 3]
-       :param cls_label: [N_rays, N_samples]
-       :param points: [N_rays, 3*N_front_sample +4 * N_back_samples]
-       :return
-       '''
-
-        # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
-        ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
-        viewdirs = ray_d / ray_d_norm  # [..., 3]
-
-        if self.pencode:
-            viewdirs = self.embedder_viewdir(viewdirs)
-            ray_o = self.embedder_position(ray_o)
-
-
-        if self.penc_pts:
-            points_fg = self.embedder_pts(points_fg)
-
-        depth_likeli_fg = self.ora_net_fg(ray_o, viewdirs, points_fg)
-
-
-        ret = OrderedDict([('likeli_fg', depth_likeli_fg)])
-
-        return ret
-
-
-class NerfNetBoxOnly(nn.Module):
-    def __init__(self, args):
-        super().__init__()
-
-        self.embedder_position = Embedder(input_dim=3,
-                                          max_freq_log2=args.max_freq_log2 - 1,
-                                          N_freqs=args.max_freq_log2)
-
-        self.embedder_viewdir = Embedder(input_dim=3,
-                                         max_freq_log2=args.max_freq_log2_viewdirs - 1,
-                                         N_freqs=args.max_freq_log2_viewdirs)
-
-        # input to this should be box position and sampled position
-        self.box_net = MLPNet(D=args.netdepth, W=args.netwidth,
-                              input_ch=self.embedder_position.out_dim,
-                              input_ch_viewdirs=self.embedder_viewdir.out_dim,
-                              use_viewdirs=args.use_viewdirs)
-
-    def forward(self, ray_o, ray_d, fg_z_max, fg_z_vals):
-        '''orch.c
-        :param ray_o, ray_d: [..., 3]
-        :param fg_z_max: [...,]
-        :param fg_z_vals, bg_z_vals: [..., N_samples]
-        :param box_locs: [..., 3]  (N. [x,y, z])
-        :return
-        '''
-        # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
-        ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
-        viewdirs = ray_d / ray_d_norm  # [..., 3]
-        dots_sh = list(ray_d.shape[:-1])
-
-        ######### render foreground
-        N_samples = fg_z_vals.shape[-1]
-        fg_ray_o = ray_o.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
-        fg_ray_d = ray_d.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
-        fg_viewdirs = viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
-        fg_pts = fg_ray_o + fg_z_vals.unsqueeze(-1) * fg_ray_d
-        input = torch.cat((self.embedder_position(fg_pts),
-                           self.embedder_viewdir(fg_viewdirs)), dim=-1)
-
-        fg_raw = self.box_net(input)
-
-        # alpha blending
-        fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
-        # account for view directions
-        fg_dists = ray_d_norm * torch.cat((fg_dists, fg_z_max.unsqueeze(-1) - fg_z_vals[..., -1:]),
-                                          dim=-1)  # [..., N_samples]
-        fg_alpha = 1. - torch.exp(-fg_raw['sigma'] * fg_dists)  # [..., N_samples]
-        T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)  # [..., N_samples]
-
-        T = torch.cat((torch.ones_like(T[..., 0:1]), T[..., :-1]), dim=-1)  # [..., N_samples]
-        fg_weights = fg_alpha * T  # [..., N_samples]
-        fg_rgb_map = torch.sum(fg_weights.unsqueeze(-1) * fg_raw['rgb'], dim=-2)  # [..., 3]
-        fg_depth_map = torch.sum(fg_weights * fg_z_vals, dim=-1)  # [...,]
-
-        acc_map = torch.sum(fg_weights, dim=-1)
-        # To composite onto a white background, use the accumulated alpha map.
-        rgb_map = fg_rgb_map + (1. - torch.unsqueeze(acc_map, dim=-1))
-
-        # rgb_map = fg_rgb_map
-        ret = OrderedDict([('rgb', rgb_map),  # loss
-                           ('fg_weights', fg_weights),  # importance sampling
-                           ('fg_rgb', fg_rgb_map),  # below are for logging
-                           ('fg_depth', fg_depth_map*30.)])
-        return ret
 
 class NerfNetBox(nn.Module):
     def __init__(self, args):
@@ -949,7 +771,7 @@ class NerfNetMoreBox(nn.Module):
         # use sigmoid to filter sigma in empty space
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
         inside_box = 0.5 / 28. - abs_dist
-        weights = torch.prod(torch.sigmoid(inside_box * 1000.), dim=-1)        
+        weights = torch.prod(torch.sigmoid(inside_box * 20.), dim=-1)        
         fg_box_raw_sigma *= weights
 
 

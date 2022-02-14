@@ -9,7 +9,7 @@ import torch.multiprocessing
 
 from collections import OrderedDict
 from .ddp_model import NerfNetWithAutoExpo, NerfNetBoxWithAutoExpo, \
-    NerfNetBoxOnlyWithAutoExpo, DepthOracle, DepthOracleBoxOnly, DepthOracleWithBox, NerfNetMoreBoxWithAutoExpo,\
+    NerfNetBoxOnlyWithAutoExpo, DepthOracle, NerfNetMoreBoxWithAutoExpo,\
     NerfNetMoreBoxIndepWithAutoExpo
 
 from .nerf_network import WrapperModule
@@ -230,8 +230,6 @@ def render_single_image(models, ray_sampler, chunk_size, box_props=None,
         rgb = torch.cat(rgbs).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
         d = torch.cat(depths).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
 
-        # likeli_fg_sig = torch.sigmoid(likeli_fg).numpy()
-        # likeli_bg_sig = torch.sigmoid(likeli_bg).numpy()
         if DEBUG:
             others = {}
             rgb_fg = torch.cat(rgbs_fg).view(ray_sampler.H, ray_sampler.W, -1).squeeze()
@@ -263,9 +261,6 @@ def eval_oracle(rays, net_oracle, fg_bg_net, use_zval,  front_sample, back_sampl
 
     if have_box:
 
-        # ret = net_oracle(rays['ray_o'], rays['ray_d'],
-        #                  rays['fg_pts_flat'], rays['bg_pts_flat'],
-        #                  rays['fg_far_depth'], rays['box_loc'][:,:2].float())
         ret = net_oracle(rays['ray_o'], rays['ray_d'],
                          rays['fg_pts_flat'], rays['bg_pts_flat'],
                          rays['fg_far_depth'])
@@ -285,13 +280,6 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
     if fg_weights is None:
         fg_weights = data['likeli_fg'].clone() # Avoid inplace ops
         bg_weights = data['likeli_bg'].clone()
-    #
-    # fg_z_vals_centre_np = fg_z_vals_centre.cpu().numpy()
-    # bg_z_vals_centre_np = bg_z_vals_centre.cpu().numpy()
-    #
-    # fg_weights_np = fg_weights.cpu().numpy()
-    # bg_weights_np = bg_weights.cpu().numpy()
-
 
     fg_weights = torch.sigmoid(fg_weights)
 
@@ -299,9 +287,6 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
 
 
     if box_weights is not None:
-        # fg_weights = fg_weights + normalize_torch(box_weights[:, 1:])
-
-        # box_norm_test = normalize_torch(box_weights).cpu().numpy()
         fg_weights = fg_weights + box_weights
 
     fg_weights[fg_z_vals_centre < 0.0002] = float(0.0)
@@ -316,18 +301,12 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
     fg_depth = fg_depth.clone()
     fg_depth[fg_depth<0.0002] = float(0.0002)
 
-    # fg_depth_np = fg_depth.cpu().numpy()
-
-
     bg_weights = torch.fliplr(bg_weights)
 
     bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]
 
     bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                           N_samples=samples, det=True))  # [..., N_samples]
-
-    # bg_depth_np = bg_depth.cpu().numpy()
-    # fg_depth_np = fg_depth.cpu().numpy()
     if use_or:
         return fg_depth, bg_depth
     return fg_depth_mid, bg_depth_mid
@@ -353,10 +332,7 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
 
     bg_z_vals_centre = rays['bg_z_vals_centre']
     use_label = False
-    
  
-
-
     ret_or = eval_oracle(rays, net_oracle, fg_bg_net, use_zval, front_sample, back_sample, have_box)
 
     if use_label:
@@ -373,27 +349,11 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
         box_weights = None
 
         if box_loc is not None:
-            # box_weights = get_box_weight(box_loc=box_loc,
-            #                              box_size=1. / 30.,
-            #                              fg_z_vals=fg_z_vals_centre,
-            #                              ray_d=ray_d, ray_o=ray_o, box_number=box_number)
-
-
 
             box_weights = get_box_transmittance_weight(box_loc=box_loc,
                                          fg_z_vals=fg_z_vals_centre,  ray_d=ray_d,
                                          ray_o=ray_o,
                                          fg_depth=fg_far_depth, box_number=box_number, box_props=box_props)
-
-            ## resample from box_nerf
-            # fg_weights = fg_weights + normalize_torch(box_weights)
-            #
-            # box_ret = net(ray_o, ray_d, fg_far_depth, fg_z_vals_centre,
-            #               bg_z_vals=None, box_loc=box_loc,
-            #               query_box_only=True)
-            #
-            # box_weights = box_ret['fg_box_sig']
-            # box_test = box_weights.cpu().numpy()
 
         fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
                                         fg_z_vals_centre, bg_z_vals_centre,
@@ -405,23 +365,9 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
 
         else:
-#             print('ray_o', ray_o.type())
-#             print('ray_d', ray_d.type())
-#             print('fg_far_depth', fg_far_depth.type())
-#             print('fg_depth', fg_depth.type())
-#             print('bg_depth', bg_depth.type())
-#             print('box_loc', box_loc.type())
-#             print('box_props', box_props.type())
+
             ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth, box_loc, box_props)
 
-
-        # fg_depth, bg_depth = get_depths(ret_or, front_sample, back_sample,
-        #                                 fg_z_vals_centre, bg_z_vals_centre,
-        #                                 samples, box_weights, train_box_only, loss_type,
-        #                                 ret['fg_weights'], ret['bg_weights'])
-        #
-        # ret = net(ray_o, ray_d, fg_far_depth, fg_depth, bg_depth)
-        #
 
         if box_weights is None:
             ret['likeli_fg'] = ret_or['likeli_fg']
@@ -429,9 +375,6 @@ def render_rays(models, rays, train_box_only, have_box, donerf_pretrain,
             ret['likeli_fg'] = torch.sigmoid(ret_or['likeli_fg']) + (box_weights)
 
         ret['likeli_bg'] = ret_or['likeli_bg']
-        #
-        # ret['likeli_fg'] = ret['fg_weights']
-        # ret['likeli_bg'] = ret['bg_weights']
 
         return ret
 
@@ -728,25 +671,7 @@ def create_nerf(rank, args, independ_boxnet=False):
             model_dict_new[k] = to_load_dep['net_0'][k]
 
 
-        # model_dict = {k: v  for k,v in to_load_dep['net_0'].items() if k in model_dict_old  }
-        #
-        # print(model_dict_old)
-
         models['net_0'].load_state_dict(model_dict_new).double()
-
-        ## ---------------new--------------- ##
-
-
-
-
-        # for m in range(models['cascade_level']):
-        #     # for name in ['net_{}'.format(m), 'optim_{}'.format(m)]:
-        #     for name in ['net_{}'.format(m)]:
-        #         for k in to_load_box[name].keys():
-        #             to_load_sc[name][k] = to_load_box[name][k]
-        #
-        #         models[name].load_state_dict(to_load_sc[name])
-
 
 
     return start, models
@@ -788,11 +713,8 @@ def ddp_train_nerf(rank, args):
 
     ###### create network and wrap in ddp; each process should do this
     start, models = create_nerf(rank, args)
-
-    ##### important!!!
-    # make sure different processes sample different rays
+    
     np.random.seed((rank + 1) * 777)
-    # make sure different processes have different perturbations in depth samples
     torch.manual_seed((rank + 1) * 777)
 
     writer = SummaryWriter(os.path.join(args.basedir, 'summaries', args.expname))
@@ -852,8 +774,6 @@ def ddp_train_nerf(rank, args):
             scalars_to_log['bce_loss_bg'] = loss_bg.item()
 
 
-
-
             loss_cls = loss_fg + loss_bg
 
 
@@ -869,9 +789,7 @@ def ddp_train_nerf(rank, args):
             with torch.no_grad():
 
                 if args.have_box:
-                    # ret = net_oracle(ray_batch['ray_o'].float(), ray_batch['ray_d'].float(),
-                    #                  ray_batch['fg_pts_flat'].float(), ray_batch['bg_pts_flat'].float(),
-                    #                  ray_batch['fg_far_depth'].float(), box_loc=ray_batch['box_loc'][:, :2])
+    
                     ret = net_oracle(ray_batch['ray_o'], ray_batch['ray_d'],
                                      ray_batch['fg_pts_flat'], ray_batch['bg_pts_flat'],
                                      ray_batch['fg_far_depth'])
@@ -912,22 +830,6 @@ def ddp_train_nerf(rank, args):
 
             if args.have_box:
                 with torch.no_grad():
-
-
-                    # option1
-
-                    # ret_box = net(ray_batch['ray_o'], ray_batch['ray_d'], ray_batch['fg_far_depth'], ray_batch['fg_z_vals_centre'],
-                    #         bg_z_vals=None, box_loc=ray_batch['box_loc'],
-                    #         query_box_only=True, img_name=ray_batch['img_name'])
-                    # box_weights = ret_box['fg_box_sig']
-                    # fg_weights = fg_weights + normalize_torch(box_weights)
-                    #
-                    # option2
-                    # lets test this --- we are gettin occupancy only, maybe we could get transmittance
-                    # box_weights = get_box_weight(box_loc=ray_batch['box_loc'], box_size=1./30.,
-                    #                              fg_z_vals=ray_batch['fg_z_vals_centre'],
-                    #                              ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'], box_number=args.box_number )
-
 
                     box_weights = get_box_transmittance_weight(box_loc=ray_batch['box_loc'], box_size=args.box_size,
                                                                fg_z_vals=perturbed_seg_bound_fg, ray_d=ray_batch['ray_d'], ray_o=ray_batch['ray_o'],
@@ -973,7 +875,6 @@ def ddp_train_nerf(rank, args):
                 d_gt_map = depth_gt[inds]
 
                 depth_loss = dep_l1l2loss(torch.div(1.,d_pred_map), torch.div(1.,d_gt_map), l1l2 = 'l1')
-                #reg_loss = dep_l1l2loss(torch.div(1.,d_pred_map[:512])-torch.div(1.,d_pred_map[512:]), torch.div(1.,d_gt_map[:512])-torch.div(1.,d_gt_map[512:]), l1l2 = 'l1')
                 loss += 0.1 * depth_loss
                 #loss = rgb_loss * 0 +  depth_loss
                 scalars_to_log['level_0/depth_loss'] = depth_loss.item()
@@ -985,19 +886,11 @@ def ddp_train_nerf(rank, args):
                 seg_box_loss =  dep_l1l2loss(seg_prediction, seg_box_gt, l1l2 = 'l2')
                 loss += seg_box_loss
                 scalars_to_log['level_0/seg_box_loss'] = seg_box_loss.item()
-
-
-
-
-
-
-
+                
             # print(global_step)
             scalars_to_log['level_0/rgb_loss'] = rgb_loss.item()
             scalars_to_log['level_0/pnsr'] = mse2psnr(rgb_loss.item())
-            # print('before backward')
             loss.backward()
-            # print('before step')
             optim.step()
 
 
@@ -1008,9 +901,6 @@ def ddp_train_nerf(rank, args):
 
         ### only main process should do the logging
         if (global_step % args.i_print == 0 or global_step < 10):
-            # print('=======likeli=====')
-            # print(out_likeli_fg)
-            # print(out_likeli_bg)
 
             logstr = '{} step: {} '.format(args.expname, global_step)
             for k in scalars_to_log:
@@ -1026,7 +916,6 @@ def ddp_train_nerf(rank, args):
             select_inds = np.arange(640*280,640*281)
             select_inds2 = np.arange(640*240,640*241)
 
-            #### critical: make sure each process is working on the same random image
             time0 = time.time()
             idx = what_val_to_log % len(val_ray_samplers)
 
@@ -1036,7 +925,9 @@ def ddp_train_nerf(rank, args):
                 rgb, d, pred_fg, pred_bg, label, others  = render_single_image(models, val_ray_samplers[idx], args.chunk_size,
                                                args.train_box_only, have_box=args.have_box, donerf_pretrain=args.donerf_pretrain,
                                                front_sample=args.front_sample, back_sample=args.back_sample, fg_bg_net=args.fg_bg_net,
-                                               use_zval=args.use_zval,  loss_type=loss_type,  rank=rank, DEBUG=True, box_number=args.box_number, box_size=args.box_size)
+                                               use_zval=args.use_zval,  loss_type=loss_type,  rank=rank, DEBUG=True, 
+                                                box_number=args.box_number, box_size=args.box_size)
+                
 
 
 
@@ -1079,19 +970,20 @@ def ddp_train_nerf(rank, args):
                 for k in metrics_fg:
                     scalars_to_log['val/'+ k + '_fg'] = metrics_fg[k]
 
-                # log_plot_conf_mat(writer, metrics_fg['cm'], global_step, 'val/CM_fg')
-
                 metrics_bg = calculate_metrics(out_likeli_bg, np.array(label_bg.cpu().detach().numpy()),
                                                'micro')
 
                 for k in metrics_bg:
                     scalars_to_log['val/'+ k + '_bg'] = metrics_bg[k]
 
-                # log_plot_conf_mat(writer, metrics_bg['cm'], global_step, 'val/CM_bg')
-                visualize_depth_label(writer, np.concatenate([label_fg.cpu().detach().numpy()[select_inds], label_fg.cpu().detach().numpy()[select_inds2]], axis=1),
-                                      np.concatenate([out_likeli_fg[select_inds], out_likeli_fg[select_inds2]], axis=1), global_step, 'val/dVis_fg')
-                visualize_depth_label(writer,np.concatenate([label_bg.cpu().detach().numpy()[select_inds], label_bg.cpu().detach().numpy()[select_inds2]], axis=1),
-                                      np.concatenate([out_likeli_bg[select_inds], out_likeli_bg[select_inds2]], axis=1), global_step, 'val/dVis_bg')
+                visualize_depth_label(writer, np.concatenate([label_fg.cpu().detach().numpy()[select_inds], 
+                                                              label_fg.cpu().detach().numpy()[select_inds2]], axis=1),
+                                      np.concatenate([out_likeli_fg[select_inds], out_likeli_fg[select_inds2]], axis=1), 
+                                      global_step,  'val/dVis_fg')
+                visualize_depth_label(writer,np.concatenate([label_bg.cpu().detach().numpy()[select_inds], 
+                                                             label_bg.cpu().detach().numpy()[select_inds2]], axis=1),
+                                      np.concatenate([out_likeli_bg[select_inds], out_likeli_bg[select_inds2]], axis=1), 
+                                      global_step, 'val/dVis_bg')
 
 
                 logstr = '[=VALIDATION=] {} step: {} '.format(args.expname, global_step)
@@ -1108,25 +1000,11 @@ def ddp_train_nerf(rank, args):
 
 
             else:
-                # label_fg = label[:, :args.front_sample]
-                # label_bg = label[:, args.front_sample:]
-                #if args.depth_training:
-                log_view_to_tb(writer, global_step, rgb,d , gt_depth=val_ray_samplers[idx].get_depth(), box_seg_mask=val_ray_samplers[idx].get_box_mask(),
+                log_view_to_tb(writer, global_step, rgb,d , gt_depth=val_ray_samplers[idx].get_depth(), 
+                               box_seg_mask=val_ray_samplers[idx].get_box_mask(),
                                gt_img=val_ray_samplers[idx].get_img(), mask=None, have_box=args.have_box,
                                train_box_only=args.train_box_only, prefix='val/',DEBUG=True, others=others)
 
-
-                # visualize_depth_label(writer, np.concatenate(
-                #     [label_fg.cpu().detach().numpy()[select_inds], label_fg.cpu().detach().numpy()[select_inds2]],axis=1),
-                #                       np.concatenate([torch.sigmoid(pred_fg[select_inds]),
-                #                                       torch.sigmoid(pred_fg[select_inds2])],
-                #                                      axis=1), global_step, 'val/dVis_fg')
-                # visualize_depth_label(writer, np.concatenate(
-                #     [label_bg.cpu().detach().numpy()[select_inds], label_bg.cpu().detach().numpy()[select_inds2]],
-                #     axis=1),
-                #                       np.concatenate([torch.sigmoid(pred_bg[select_inds]),
-                #                                       torch.sigmoid(pred_bg[select_inds2])],
-                #                                      axis=1), global_step, 'val/dVis_fg')
 
                 visualize_depth_label(writer, None,
                                           np.concatenate([torch.sigmoid(pred_fg[select_inds]),

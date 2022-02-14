@@ -49,11 +49,19 @@ class Embedder(nn.Module):
         out = []
         if self.include_input:
             out.append(input)
+            
+
 
         for i in range(len(self.freq_bands)):
+            if i > 6:
+                a = 0.0
+#             elif i>3:
+#                 a = 0.7
+            else:
+                a = 1.
             freq = self.freq_bands[i]
             for p_fn in self.periodic_fns:
-                out.append(p_fn(input * freq))
+                out.append(p_fn(input * freq) * a)
         out = torch.cat(out, dim=-1)
 
         assert (out.shape[-1] == self.out_dim)
