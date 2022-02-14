@@ -306,10 +306,17 @@ def get_box_transmittance_weight(box_loc, fg_z_vals, ray_d, ray_o, fg_depth,box_
     offset_rot = torch.abs(torch.matmul(torch.inverse(r_mat), offset)).squeeze(-1)
     abs_dist  = offset_rot / (box_size.unsqueeze(1).expand(-1,N_samples,-1,-1) +TINY_NUMBER) #box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
     inside_box = 0.5  - abs_dist
+<<<<<<< HEAD
     weights = torch.prod(torch.sigmoid(inside_box * 20.), dim=-1) # N_rays + [N_samples, box_number]
 
 
     box_occupancy = (torch.sigmoid(torch.sum(weights, dim=-1)*20.) - 0.5 ) * 2
+=======
+    weights = torch.prod(torch.sigmoid(inside_box * 80.), dim=-1) # N_rays + [N_samples, box_number]
+
+
+    box_occupancy = (torch.sigmoid(torch.sum(weights, dim=-1)*80.) - 0.5 ) * 2
+>>>>>>> 6dfd4e02438b009a09e047057ae6200f7ffb4f84
 
     # in_boxes = weights > 0.95  # torch.sum(in_boxes_compare, dim=-1) == 3  # N, N_samples, N_b,
     #

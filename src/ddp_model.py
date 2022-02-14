@@ -159,7 +159,7 @@ class DepthOracle(nn.Module):
 
         # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
         ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
-        viewdirs = ray_d / ray_d_norm  # [..., 3]
+        viewdirs = ray_d / (ray_d_norm + TINY_NUMBER)  # [..., 3]
 
         ray_o_bg = ray_o + ray_d * fg_far_depth.unsqueeze(-1)
 
@@ -519,10 +519,10 @@ class NerfNetMoreBoxIndep(nn.Module):
         :param box_locs: [..., 3]  (N. [x,y, z])
         :return
         '''
-
+        print('indep')
         # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
         ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
-        viewdirs = ray_d / ray_d_norm  # [..., 3]
+        viewdirs = ray_d / (ray_d_norm  + TINY_NUMBER) # [..., 3]
         dots_sh = list(ray_d.shape[:-1])
 
         ######### render foreground
@@ -550,11 +550,10 @@ class NerfNetMoreBoxIndep(nn.Module):
                         - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])).unsqueeze(-1)).squeeze(-1))/
                       (box_sizes*30.+TINY_NUMBER).unsqueeze(0).unsqueeze(0))\
             .permute(0,2,1,3).reshape(dots_sh[0],self.box_number, N_samples, 3)
-
-
+        
         expanded_viewdir = fg_viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3]).permute(0,2,1,3)
         expanded_viewdir_reshape = expanded_viewdir.reshape(dots_sh[0],self.box_number, N_samples, 3)
-        
+
 
 #         assert input_box.shape == (dots_sh[0]*self.box_number, N_samples, self.fg_embedder_position_box.out_dim + self.fg_embedder_viewdir_box.out_dim)
         
@@ -578,7 +577,7 @@ class NerfNetMoreBoxIndep(nn.Module):
         # use sigmoid to filter sigma in empty space
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
         inside_box = 0.5 / 28. - abs_dist
-        weights = torch.prod(torch.sigmoid(inside_box * 1000.), dim=-1)        
+        weights = torch.prod(torch.sigmoid(inside_box * 50.), dim=-1)        
         fg_box_raw_sigma *= weights
 
 
@@ -644,6 +643,8 @@ class NerfNetMoreBoxIndep(nn.Module):
 
         depth_map = fg_depth_map + bg_depth_map
         rgb_map = fg_rgb_map + bg_rgb_map
+        
+         
         
 #         print('depth_map', depth_map.type())
 #         print('rgb_map', rgb_map.type())
@@ -721,10 +722,14 @@ class NerfNetMoreBox(nn.Module):
         :return
         '''
 
-        # print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
+#         print(ray_o.shape, ray_d.shape, fg_z_max.shape, fg_z_vals.shape, bg_z_vals.shape)
+      
         ray_d_norm = torch.norm(ray_d, dim=-1, keepdim=True)  # [..., 1]
         viewdirs = ray_d / ray_d_norm  # [..., 3]
         dots_sh = list(ray_d.shape[:-1])
+        
+#         fg_z_vals.register_hook(lambda grad: print("[fg_z_vals]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any())))  
+        
 
         ######### render foreground
         N_samples = fg_z_vals.shape[-1]
@@ -733,6 +738,7 @@ class NerfNetMoreBox(nn.Module):
         fg_viewdirs = viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, 3])
         fg_pts = fg_ray_o + fg_z_vals.unsqueeze(-1) * fg_ray_d
 
+        
         box_loc = box_loc.view(-1, self.box_number, 3)
         colors, box_sizes, box_rot =  box_props[:, 0:3], box_props[:, 3:6], box_props[:, 6:]
 
@@ -751,16 +757,28 @@ class NerfNetMoreBox(nn.Module):
                         - box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3])).unsqueeze(-1)).squeeze(-1))/
                       (box_sizes*30.+ TINY_NUMBER).unsqueeze(0).unsqueeze(0))\
             .permute(0,2,1,3).reshape(dots_sh[0]*self.box_number, N_samples, 3)
-
-
+        
+#         box_offset.register_hook(lambda grad: print("[box_offset]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any())))  
+        
+        
         expanded_viewdir = fg_viewdirs.unsqueeze(-2).expand(dots_sh + [N_samples, self.box_number, 3]).permute(0,2,1,3)
         expanded_viewdir_reshape = expanded_viewdir.reshape(dots_sh[0]*self.box_number, N_samples, 3)
+        
+#         expanded_viewdir.register_hook(lambda grad: print("[expanded_viewdir]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any())))  
+        
+        
         input_box = torch.cat((self.fg_embedder_position_box(box_offset),
                                self.fg_embedder_viewdir_box(expanded_viewdir_reshape)), dim=-1)
+        
+#         input_box.register_hook(lambda grad: print("[input_box]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any())))  
+        
 
         assert input_box.shape == (dots_sh[0]*self.box_number, N_samples, self.fg_embedder_position_box.out_dim + self.fg_embedder_viewdir_box.out_dim)
 
         fg_box_raw = self.box_net(input_box)  # (N, *)
+        
+#         fg_box_raw.register_hook(lambda grad: print("[fg_box_raw]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
+#         
         fg_box_raw_sigma = fg_box_raw['sigma'].view(dots_sh[0], self.box_number, N_samples)
         
 #         print(fg_box_raw_sigma.view(32,100, self.box_number, N_samples)[2,50,...])
@@ -771,17 +789,27 @@ class NerfNetMoreBox(nn.Module):
         # use sigmoid to filter sigma in empty space
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
         inside_box = 0.5 / 28. - abs_dist
+<<<<<<< HEAD
         weights = torch.prod(torch.sigmoid(inside_box * 20.), dim=-1)        
+=======
+        weights = torch.prod(torch.sigmoid(inside_box * 50.), dim=-1)        
+>>>>>>> 6dfd4e02438b009a09e047057ae6200f7ffb4f84
         fg_box_raw_sigma *= weights
+        
+#         fg_box_raw_sigma.register_hook(lambda grad: print("[fg_box_raw_sigma]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
 
 
         input = torch.cat((self.fg_embedder_position(fg_pts),
                            self.fg_embedder_viewdir(fg_viewdirs)), dim=-1)
         fg_raw = self.fg_net(input)
         
+#         fg_raw.register_hook(lambda grad: print("[fg_raw]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
+        
         
         fg_raw['rgb'] = fg_raw['rgb'] * check_shadow_aabb_inters(
             fg_pts, box_loc.unsqueeze(1).expand(dots_sh + [N_samples, self.box_number, 3]), box_sizes, r, self.box_number)
+        
+#         fg_raw['rgb'].register_hook(lambda grad: print("[fg_raw['rgb']]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
 
         # alpha blending
         fg_dists = fg_z_vals[..., 1:] - fg_z_vals[..., :-1]
@@ -790,16 +818,22 @@ class NerfNetMoreBox(nn.Module):
                                           dim=-1)  # [..., N_samples]
 
         fg_alpha = 1. - torch.exp(-(fg_raw['sigma'] + torch.sum(fg_box_raw_sigma, dim=1)) * fg_dists)  # [..., N_samples]
+        
+#         fg_alpha.register_hook(lambda grad: print("[fg_alpha]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
 
         T = torch.cumprod(1. - fg_alpha + TINY_NUMBER, dim=-1)  # [..., N_samples]
         bg_lambda = T[..., -1]
         T = torch.cat((torch.ones_like(T[..., 0:1]), T[..., :-1]), dim=-1)  # [..., N_samples]
         fg_weights = fg_alpha * T  # [..., N_samples]
+        
+#         fg_weights.register_hook(lambda grad: print("[fg_weights]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
 
 
         fg_rgb = torch.div(torch.sum(fg_box_raw_sigma.unsqueeze(-1) * fg_box_raw_rgb, dim=1)
                   + fg_raw['sigma'].unsqueeze(-1) * fg_raw['rgb'],
                   fg_raw['sigma'].unsqueeze(-1) + torch.sum(fg_box_raw_sigma, dim=1).unsqueeze(-1) + 0.0001)
+        
+#         fg_rgb.register_hook(lambda grad: print("[fg_rgb]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
 
         fg_rgb_map = torch.sum(fg_weights.unsqueeze(-1) * fg_rgb, dim=-2)  # [..., 3]
         fg_depth_map = torch.sum(fg_weights * fg_z_vals, dim=-1)  # [...,]
@@ -816,9 +850,13 @@ class NerfNetMoreBox(nn.Module):
         # near_depth: physical far; far_depth: physical near
         input = torch.flip(input, dims=[-2, ])
         bg_z_vals = torch.flip(bg_z_vals, dims=[-1, ])  # 1--->0
+        
+        
         bg_dists = bg_z_vals[..., :-1] - bg_z_vals[..., 1:]
         bg_dists = torch.cat((bg_dists, HUGE_NUMBER * torch.ones_like(bg_dists[..., 0:1])), dim=-1)  # [..., N_samples]
         bg_raw = self.bg_net(input)
+
+#         bg_raw.register_hook(lambda grad: print("[bg_raw]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
 
         bg_alpha = 1. - torch.exp(-bg_raw['sigma'] * bg_dists)  # [..., N_samples]
         # Eq. (3): T
@@ -836,7 +874,14 @@ class NerfNetMoreBox(nn.Module):
         bg_depth_map = bg_lambda * bg_depth_map
 
         depth_map = fg_depth_map + bg_depth_map
+#         fg_depth_map.register_hook(lambda grad: print("[fg_depth_map]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
+#         bg_depth_map.register_hook(lambda grad: print("[bg_depth_map]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
+        
         rgb_map = fg_rgb_map + bg_rgb_map
+        
+#         print('here')
+#         fg_rgb_map.register_hook(lambda grad: print(grad) )
+#         bg_rgb_map.register_hook(lambda grad: print("[bg_rgb_map]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 
         
 #         print('depth_map', depth_map.type())
 #         print('rgb_map', rgb_map.type())

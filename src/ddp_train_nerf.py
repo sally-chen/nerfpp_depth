@@ -296,17 +296,23 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
 
     fg_depth,_ = torch.sort(sample_pdf(bins=fg_depth_mid, weights=fg_weights[:, 1:front_sample-1],
                           N_samples=samples, det=True))  # [..., N_samples]
-
-
+    
     fg_depth = fg_depth.clone()
     fg_depth[fg_depth<0.0002] = float(0.0002)
 
     bg_weights = torch.fliplr(bg_weights)
 
     bg_weights = torch.sigmoid(bg_weights)[:, 1:back_sample-1]
-
+    
     bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                           N_samples=samples, det=True))  # [..., N_samples]
+<<<<<<< HEAD
+=======
+
+
+    # bg_depth_np = bg_depth.cpu().numpy()
+    # fg_depth_np = fg_depth.cpu().numpy()
+>>>>>>> 6dfd4e02438b009a09e047057ae6200f7ffb4f84
     if use_or:
         return fg_depth, bg_depth
     return fg_depth_mid, bg_depth_mid
