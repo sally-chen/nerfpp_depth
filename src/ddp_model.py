@@ -789,11 +789,9 @@ class NerfNetMoreBox(nn.Module):
         # use sigmoid to filter sigma in empty space
         abs_dist = torch.abs(box_offset.reshape(dots_sh[0], self.box_number, N_samples, 3))
         inside_box = 0.5 / 28. - abs_dist
-<<<<<<< HEAD
-        weights = torch.prod(torch.sigmoid(inside_box * 20.), dim=-1)        
-=======
+
         weights = torch.prod(torch.sigmoid(inside_box * 50.), dim=-1)        
->>>>>>> 6dfd4e02438b009a09e047057ae6200f7ffb4f84
+
         fg_box_raw_sigma *= weights
         
 #         fg_box_raw_sigma.register_hook(lambda grad: print("[fg_box_raw_sigma]" +" Gradients bigger than 1e6:", bool((grad > 1e6).any()))) 

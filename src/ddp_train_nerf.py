@@ -306,13 +306,7 @@ def get_depths(data, front_sample, back_sample, fg_z_vals_centre,
     
     bg_depth,_ = torch.sort(sample_pdf(bins=bg_depth_mid, weights=bg_weights,
                           N_samples=samples, det=True))  # [..., N_samples]
-<<<<<<< HEAD
-=======
 
-
-    # bg_depth_np = bg_depth.cpu().numpy()
-    # fg_depth_np = fg_depth.cpu().numpy()
->>>>>>> 6dfd4e02438b009a09e047057ae6200f7ffb4f84
     if use_or:
         return fg_depth, bg_depth
     return fg_depth_mid, bg_depth_mid
